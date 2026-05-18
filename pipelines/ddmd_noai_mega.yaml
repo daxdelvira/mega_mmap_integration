@@ -1,0 +1,37 @@
+# Jarvis-style pipeline: DeepDriveMD non-agentic (openmm_noai) + vanilla MegaMmap
+#
+# Same structure as ddmd_agentic_mega.yaml but drives the NoAI workflow
+# (simulations only, no CVAE training/inference).  MegaMmap patch is still
+# installed so any incidental contact-map loads also go through the shim.
+
+name: ddmd_noai_mega
+env: mega_mmap
+
+params:
+  window_size: 256m
+  nprocs: 1
+  config: /path/to/ddmd_experiment.yaml
+  stats_csv: results/stats_dict.csv
+
+pkgs:
+  - pkg_type: hermes_run
+    pkg_name: hermes_run
+    sleep: 3
+    pqdepth: 8
+    ram: ${params.window_size}
+    do_dbg: false
+    dbg_port: 4000
+
+  - pkg_type: cmd
+    pkg_name: ddmd_noai
+    cmd: >-
+      python ${AGENT_HPC_ROOT}/mega_mmap_integration/ddmd/run_noai.py
+        --config ${params.config}
+        --stats-csv ${params.stats_csv}
+        --nprocs ${params.nprocs}
+    env:
+      MEGA_SHIM: ${AGENT_HPC_ROOT}/mega_mmap_integration/ddmd/shims/build/ddmd_contact_map_loader
+      MEGA_WINDOW: ${params.window_size}
+      MEGA_WORKDIR: /tmp/mega_ddmd
+      MEGA_NPROCS: ${params.nprocs}
+    depends_on: [hermes_run]

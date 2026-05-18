@@ -1,0 +1,50 @@
+# Jarvis-style pipeline: DeepDriveMD agentic (openmm_cvae) + vanilla MegaMmap
+#
+# Mirrors the structure of mega_mmap/test/unit/pipelines/mm_kmeans_mega.yaml.
+# Three stages: (1) start Hermes daemon, (2) run DDMD agentic workflow with
+# MegaMmap contact-map patch, (3) collect metrics row.
+#
+# Adjustable parameters
+# ---------------------
+#   window_size   : DRAM buffer window for MegaMmap (e.g. "256m", "4g")
+#   nprocs        : MPI ranks for ddmd_contact_map_loader shim
+#   config        : path to the DDMD ExperimentSettings YAML
+#   stats_csv     : where to write the stats_dict row
+
+name: ddmd_agentic_mega
+env: mega_mmap
+
+params:
+  window_size: 256m
+  nprocs: 1
+  config: /path/to/ddmd_experiment.yaml
+  stats_csv: results/stats_dict.csv
+
+pkgs:
+  # ------------------------------------------------------------------
+  # Stage 1: Hermes daemon (provides tiered buffer pool for the shim)
+  # ------------------------------------------------------------------
+  - pkg_type: hermes_run
+    pkg_name: hermes_run
+    sleep: 3          # seconds to wait after daemon start before proceeding
+    pqdepth: 8
+    ram: ${params.window_size}
+    do_dbg: false
+    dbg_port: 4000
+
+  # ------------------------------------------------------------------
+  # Stage 2: DDMD agentic workflow with MegaMmap contact-map patch
+  # ------------------------------------------------------------------
+  - pkg_type: cmd
+    pkg_name: ddmd_agentic
+    cmd: >-
+      python ${AGENT_HPC_ROOT}/mega_mmap_integration/ddmd/run_agentic.py
+        --config ${params.config}
+        --stats-csv ${params.stats_csv}
+        --nprocs ${params.nprocs}
+    env:
+      MEGA_SHIM: ${AGENT_HPC_ROOT}/mega_mmap_integration/ddmd/shims/build/ddmd_contact_map_loader
+      MEGA_WINDOW: ${params.window_size}
+      MEGA_WORKDIR: /tmp/mega_ddmd
+      MEGA_NPROCS: ${params.nprocs}
+    depends_on: [hermes_run]

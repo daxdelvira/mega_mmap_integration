@@ -1,0 +1,37 @@
+# Jarvis-style pipeline: AtomAgents Exp2 non-agentic (baseline) + vanilla MegaMmap
+#
+# Same as atomagents_agentic_mega.yaml but uses --runtime-mode baseline, which
+# runs LAMMPS screw-dislocation simulations without LLM steering.
+# Hermes transparent mode is still applied so LAMMPS file I/O also benefits.
+
+name: atomagents_noai_mega
+env: mega_mmap
+
+params:
+  window_size: 256m         # No LLM weights → smaller buffer pool is fine
+  nprocs: 1
+  stats_csv: results/stats_dict.csv
+  hw_profile: l40s
+  exp2_extra_args: ""
+
+pkgs:
+  - pkg_type: hermes_run
+    pkg_name: hermes_run
+    sleep: 3
+    pqdepth: 8
+    ram: ${params.window_size}
+    do_dbg: false
+    dbg_port: 4000
+
+  - pkg_type: cmd
+    pkg_name: atomagents_noai
+    cmd: >-
+      python ${AGENT_HPC_ROOT}/mega_mmap_integration/atomagents_exp2/run_noai.py
+        --stats-csv ${params.stats_csv}
+        --nprocs ${params.nprocs}
+        -- --hw-profile ${params.hw_profile} ${params.exp2_extra_args}
+    env:
+      HERMES_INTERCEPTOR: ${HERMES_ROOT}/lib/libhermes_posix.so
+      MEGA_WINDOW: ${params.window_size}
+      MEGA_WORKDIR: /tmp/mega_atomagents
+    depends_on: [hermes_run]

@@ -1,0 +1,41 @@
+# Jarvis-style pipeline: AtomAgents Exp2 agentic (observe_only) + vanilla MegaMmap
+#
+# AtomAgents' heavy I/O is LLM model weights loaded by transformers/torch.
+# MegaMmap is applied via Hermes' transparent POSIX interceptor (LD_PRELOAD),
+# which intercepts mmap/read calls without modifying AtomAgents source.
+#
+# Stage 1 starts the Hermes daemon to back the buffer pool.
+# Stage 2 launches cluster_atomagents_exp2.py with LD_PRELOAD injected.
+
+name: atomagents_agentic_mega
+env: mega_mmap
+
+params:
+  window_size: 4g           # LLM weights are large; recommend ≥4 GB
+  nprocs: 1
+  stats_csv: results/stats_dict.csv
+  hw_profile: l40s          # l40s or rtx6000
+  # Forward any extra cluster_atomagents_exp2.py args after the '--' sentinel:
+  exp2_extra_args: ""
+
+pkgs:
+  - pkg_type: hermes_run
+    pkg_name: hermes_run
+    sleep: 5
+    pqdepth: 8
+    ram: ${params.window_size}
+    do_dbg: false
+    dbg_port: 4000
+
+  - pkg_type: cmd
+    pkg_name: atomagents_agentic
+    cmd: >-
+      python ${AGENT_HPC_ROOT}/mega_mmap_integration/atomagents_exp2/run_agentic.py
+        --stats-csv ${params.stats_csv}
+        --nprocs ${params.nprocs}
+        -- --hw-profile ${params.hw_profile} ${params.exp2_extra_args}
+    env:
+      HERMES_INTERCEPTOR: ${HERMES_ROOT}/lib/libhermes_posix.so
+      MEGA_WINDOW: ${params.window_size}
+      MEGA_WORKDIR: /tmp/mega_atomagents
+    depends_on: [hermes_run]
