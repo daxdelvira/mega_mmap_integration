@@ -125,6 +125,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 0c. cereal  (required by HermesShm; header-only, fast build)
+# ---------------------------------------------------------------------------
+if [ ! -f "$INSTALL_ROOT/share/cmake/cereal/cerealConfig.cmake" ] && \
+   [ ! -f "$INSTALL_ROOT/lib/cmake/cereal/cerealConfig.cmake" ] && \
+   [ ! -f "$INSTALL_ROOT/lib64/cmake/cereal/cerealConfig.cmake" ]; then
+    echo "==> Cloning cereal..."
+    cd "$SRC_ROOT"
+    git clone --depth=1 --branch v1.3.2 https://github.com/USCiLab/cereal cereal
+    cd cereal
+    cmake -S . -B build \
+        -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DJUST_INSTALL_CEREAL=ON \
+        -DBUILD_DOC=OFF \
+        -DBUILD_SANDBOX=OFF \
+        -DBUILD_TESTS=OFF
+    cmake --build build -j"$(nproc)"
+    cmake --install build
+    echo "==> cereal installed"
+else
+    echo "==> cereal already installed, skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # 1. HermesShm  (required by Hermes and MegaMmap)
 # ---------------------------------------------------------------------------
 if [ ! -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] && \
