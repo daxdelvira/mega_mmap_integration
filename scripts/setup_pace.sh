@@ -190,12 +190,15 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
 
     cd "$SRC_ROOT/hermes"
 
-    # Patch out REQUIRED on thallium — it's an optional RPC transport for our use case
-    # and builds on PACE that don't have Argobots/Mercury/Margo will fail otherwise.
-    sed -i 's/find_package(thallium REQUIRED/find_package(thallium/g' CMakeLists.txt
-    sed -i 's/find_package(thallium)/find_package(thallium QUIET)/g' CMakeLists.txt
+    # Patch out REQUIRED on thallium (actual text: "find_package(thallium CONFIG REQUIRED)")
+    # It's an optional RPC transport; PACE doesn't have Argobots/Mercury/Margo.
+    sed -i 's/find_package(thallium CONFIG REQUIRED)/find_package(thallium CONFIG QUIET)/g' \
+        CMakeLists.txt
+    # Also patch the installed HermesShmCommonConfig.cmake which has the same call
+    sed -i 's/find_package(thallium CONFIG REQUIRED)/find_package(thallium CONFIG QUIET)/g' \
+        "$INSTALL_ROOT/cmake/HermesShmCommonConfig.cmake"
 
-    # Wipe any stale build dir so cmake re-reads the patched CMakeLists
+    # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
 
     cmake -S . -B build \
