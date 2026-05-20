@@ -75,17 +75,37 @@ echo "==> Modules loaded"
 set -e   # re-enable exit-on-error for the build steps
 
 # ---------------------------------------------------------------------------
-# 1. Hermes
+# 1. HermesShm  (required by Hermes and MegaMmap)
+# ---------------------------------------------------------------------------
+if [ ! -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] && \
+   [ ! -d "$INSTALL_ROOT/include/hermes_shm" ]; then
+    echo "==> Cloning HermesShm..."
+    cd "$SRC_ROOT"
+    git clone --depth=1 https://github.com/grc-iit/hermes_shm hermes_shm || true
+    cd hermes_shm
+    cmake -S . -B build \
+        -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
+        -DCMAKE_BUILD_TYPE=Release
+    cmake --build build -j"$(nproc)"
+    cmake --install build
+    echo "==> HermesShm installed"
+else
+    echo "==> HermesShm already installed, skipping"
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Hermes (GRC-IIT version — NOT HDF Group's Hermes)
 # ---------------------------------------------------------------------------
 if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
-    echo "==> Cloning Hermes..."
+    echo "==> Cloning Hermes (GRC-IIT)..."
     cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/HDFGroup/hermes hermes || true
+    git clone --depth=1 https://github.com/grc-iit/hermes hermes || true
     cd hermes
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DHERMES_ENABLE_MPI=ON
+        -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
+        -DHermesShm_DIR="$INSTALL_ROOT/lib/cmake/HermesShm"
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
@@ -94,7 +114,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. MegaMmap
+# 3. MegaMmap
 # ---------------------------------------------------------------------------
 if [ ! -d "$INSTALL_ROOT/include/mega_mmap" ]; then
     echo "==> Cloning MegaMmap..."
@@ -104,7 +124,7 @@ if [ ! -d "$INSTALL_ROOT/include/mega_mmap" ]; then
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DHERMES_ROOT="$INSTALL_ROOT"
+        -DCMAKE_PREFIX_PATH="$INSTALL_ROOT"
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> MegaMmap installed"
@@ -113,7 +133,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. DDMD contact-map shim
+# 4. DDMD contact-map shim
 # ---------------------------------------------------------------------------
 SHIM_DIR="$AGENT_HPC_ROOT/mega_mmap_integration/ddmd/shims"
 SHIM_BIN="$SHIM_DIR/build/ddmd_contact_map_loader"
@@ -123,6 +143,7 @@ if [ ! -f "$SHIM_BIN" ]; then
     cmake -S "$SHIM_DIR" -B "$SHIM_DIR/build" \
         -DMEGAMMAP_ROOT="$SRC_ROOT/mega_mmap" \
         -DHERMES_ROOT="$INSTALL_ROOT" \
+        -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release
     cmake --build "$SHIM_DIR/build" -j"$(nproc)"
     echo "==> DDMD shim built: $SHIM_BIN"
