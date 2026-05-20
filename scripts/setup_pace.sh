@@ -92,7 +92,9 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] && \
     cd hermes_shm
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
-        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DHERMES_SHM_ENABLE_TESTING=OFF
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> HermesShm installed"
@@ -112,7 +114,8 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
-        -DHermesShm_DIR="$INSTALL_ROOT/lib/cmake/HermesShm"
+        -DHermesShm_DIR="$INSTALL_ROOT/lib/cmake/HermesShm" \
+        -DBUILD_TESTING=OFF
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
@@ -131,7 +134,8 @@ if [ ! -d "$INSTALL_ROOT/include/mega_mmap" ]; then
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="$INSTALL_ROOT"
+        -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
+        -DBUILD_TESTING=OFF
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> MegaMmap installed"
