@@ -82,6 +82,27 @@ echo "==> Modules loaded"
 set -e   # re-enable exit-on-error for the build steps
 
 # ---------------------------------------------------------------------------
+# 0. Catch2 v3  (required by HermesShm's CMake config unconditionally)
+# ---------------------------------------------------------------------------
+if [ ! -f "$INSTALL_ROOT/lib/cmake/Catch2/Catch2Config.cmake" ] && \
+   [ ! -f "$INSTALL_ROOT/lib64/cmake/Catch2/Catch2Config.cmake" ]; then
+    echo "==> Cloning Catch2..."
+    cd "$SRC_ROOT"
+    git clone --depth=1 --branch v3.5.4 https://github.com/catchorg/Catch2 catch2
+    cd catch2
+    cmake -S . -B build \
+        -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCATCH_INSTALL_DOCS=OFF \
+        -DCATCH_BUILD_TESTING=OFF
+    cmake --build build -j"$(nproc)"
+    cmake --install build
+    echo "==> Catch2 installed"
+else
+    echo "==> Catch2 already installed, skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # 1. HermesShm  (required by Hermes and MegaMmap)
 # ---------------------------------------------------------------------------
 if [ ! -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] && \
