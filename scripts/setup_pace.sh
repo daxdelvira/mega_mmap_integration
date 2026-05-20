@@ -29,17 +29,29 @@ module purge
 
 _load_latest() {
     local name=$1
-    # spider output lists versions as "  name/x.y.z"; grab the highest
     local ver
     ver=$(module spider "$name" 2>&1 \
         | grep -oP "${name}/[0-9][^\s]*" \
         | sort -V | tail -1)
-    if [ -n "$ver" ]; then
-        echo "==>   loading $ver"
-        module load "$ver"
-    else
+    if [ -z "$ver" ]; then
         echo "WARNING: no module found for '$name' — skipping" >&2
+        return
     fi
+    # Check if this version has prerequisites and load them first
+    local prereq
+    prereq=$(module spider "$ver" 2>&1 \
+        | grep -A10 "You will need to load" \
+        | grep -v "You will need" \
+        | grep -v "^--" \
+        | grep -E "^\s+\S+/\S+" \
+        | head -1 \
+        | xargs)
+    if [ -n "$prereq" ]; then
+        echo "==>   loading prerequisite: $prereq (needed by $ver)"
+        module load $prereq
+    fi
+    echo "==>   loading $ver"
+    module load "$ver"
 }
 
 _load_latest gcc
