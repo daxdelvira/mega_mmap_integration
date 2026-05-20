@@ -188,25 +188,19 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     echo "==> Cloning Hermes (GRC-IIT)..."
     _clone_if_needed hermes https://github.com/grc-iit/hermes
 
-    # Check if PACE spack has thallium; if so, add it to the prefix path
-    THALLIUM_SPACK=$(module spider thallium 2>&1 | grep -oP 'thallium/[^\s]+' | head -1 || true)
-    EXTRA_THALLIUM=""
-    if [ -n "$THALLIUM_SPACK" ]; then
-        echo "==>   Found PACE spack thallium: $THALLIUM_SPACK"
-        module load "$THALLIUM_SPACK" 2>/dev/null || true
-    else
-        echo "==>   thallium not found in PACE spack; disabling in Hermes build"
-        EXTRA_THALLIUM="-Dhermes_enable_rpc_thallium=OFF -DHERMES_ENABLE_THALLIUM=OFF -DHERMES_RPC_THALLIUM=OFF"
-    fi
-
     cd "$SRC_ROOT/hermes"
+
+    # Patch out REQUIRED on thallium — it's an optional RPC transport for our use case
+    # and builds on PACE that don't have Argobots/Mercury/Margo will fail otherwise.
+    sed -i 's/find_package(thallium REQUIRED/find_package(thallium/g' CMakeLists.txt
+    sed -i 's/find_package(thallium)/find_package(thallium QUIET)/g' CMakeLists.txt
+
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
         -DHermesShm_DIR="$INSTALL_ROOT/cmake" \
-        -DBUILD_TESTING=OFF \
-        $EXTRA_THALLIUM
+        -DBUILD_TESTING=OFF
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
