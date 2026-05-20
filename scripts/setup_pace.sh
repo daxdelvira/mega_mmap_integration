@@ -189,13 +189,26 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     echo "==> Cloning Hermes (GRC-IIT)..."
     cd "$SRC_ROOT"
     git clone --depth=1 https://github.com/grc-iit/hermes hermes
+
+    # Check if PACE spack has thallium; if so, add it to the prefix path
+    THALLIUM_SPACK=$(module spider thallium 2>&1 | grep -oP 'thallium/[^\s]+' | head -1 || true)
+    EXTRA_THALLIUM=""
+    if [ -n "$THALLIUM_SPACK" ]; then
+        echo "==>   Found PACE spack thallium: $THALLIUM_SPACK"
+        module load "$THALLIUM_SPACK" 2>/dev/null || true
+    else
+        echo "==>   thallium not found in PACE spack; disabling in Hermes build"
+        EXTRA_THALLIUM="-Dhermes_enable_rpc_thallium=OFF -DHERMES_ENABLE_THALLIUM=OFF -DHERMES_RPC_THALLIUM=OFF"
+    fi
+
     cd hermes
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
-        -DHermesShm_DIR="$INSTALL_ROOT/lib/cmake/HermesShm" \
-        -DBUILD_TESTING=OFF
+        -DHermesShm_DIR="$INSTALL_ROOT/cmake" \
+        -DBUILD_TESTING=OFF \
+        $EXTRA_THALLIUM
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
