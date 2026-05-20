@@ -81,15 +81,34 @@ _load_latest cuda
 echo "==> Modules loaded"
 set -e   # re-enable exit-on-error for the build steps
 
+# Helper: find any cmake config file for a package across common install prefixes
+_cmake_installed() {
+    local pkg=$1; shift          # remaining args are config filenames to check
+    for cfg in "$@"; do
+        for base in lib lib64 share; do
+            [ -f "$INSTALL_ROOT/$base/cmake/$pkg/$cfg" ] && return 0
+        done
+    done
+    return 1
+}
+
+# Helper: clone only if the source dir doesn't exist yet
+_clone_if_needed() {
+    local dir=$1 url=$2; shift 2  # remaining args forwarded to git clone
+    if [ ! -d "$SRC_ROOT/$dir" ]; then
+        git clone --depth=1 "$@" "$url" "$SRC_ROOT/$dir"
+    else
+        echo "    (source dir $dir already present, skipping clone)"
+    fi
+}
+
 # ---------------------------------------------------------------------------
-# 0. Catch2 v3  (required by HermesShm's CMake config unconditionally)
+# 0. Catch2 v3
 # ---------------------------------------------------------------------------
-if [ ! -f "$INSTALL_ROOT/lib/cmake/Catch2/Catch2Config.cmake" ] && \
-   [ ! -f "$INSTALL_ROOT/lib64/cmake/Catch2/Catch2Config.cmake" ]; then
-    echo "==> Cloning Catch2..."
-    cd "$SRC_ROOT"
-    git clone --depth=1 --branch v3.5.4 https://github.com/catchorg/Catch2 catch2
-    cd catch2
+if ! _cmake_installed Catch2 Catch2Config.cmake catch2Config.cmake; then
+    echo "==> Building Catch2..."
+    _clone_if_needed catch2 https://github.com/catchorg/Catch2 --branch v3.5.4
+    cd "$SRC_ROOT/catch2"
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -103,15 +122,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 0b. yaml-cpp  (required by HermesShm's CMake config unconditionally)
+# 0b. yaml-cpp
 # ---------------------------------------------------------------------------
-if [ ! -f "$INSTALL_ROOT/lib/cmake/yaml-cpp/yaml-cppConfig.cmake" ] && \
-   [ ! -f "$INSTALL_ROOT/lib64/cmake/yaml-cpp/yaml-cppConfig.cmake" ] && \
-   [ ! -f "$INSTALL_ROOT/share/cmake/yaml-cpp/yaml-cppConfig.cmake" ]; then
-    echo "==> Cloning yaml-cpp..."
-    cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/jbeder/yaml-cpp yaml-cpp
-    cd yaml-cpp
+if ! _cmake_installed yaml-cpp yaml-cppConfig.cmake yaml-cpp-config.cmake; then
+    echo "==> Building yaml-cpp..."
+    _clone_if_needed yaml-cpp https://github.com/jbeder/yaml-cpp
+    cd "$SRC_ROOT/yaml-cpp"
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -125,15 +141,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 0c. cereal  (required by HermesShm; header-only, fast build)
+# 0c. cereal  (header-only)
 # ---------------------------------------------------------------------------
-if [ ! -f "$INSTALL_ROOT/share/cmake/cereal/cerealConfig.cmake" ] && \
-   [ ! -f "$INSTALL_ROOT/lib/cmake/cereal/cerealConfig.cmake" ] && \
-   [ ! -f "$INSTALL_ROOT/lib64/cmake/cereal/cerealConfig.cmake" ]; then
-    echo "==> Cloning cereal..."
-    cd "$SRC_ROOT"
-    git clone --depth=1 --branch v1.3.2 https://github.com/USCiLab/cereal cereal
-    cd cereal
+if ! _cmake_installed cereal cerealConfig.cmake cereal-config.cmake; then
+    echo "==> Building cereal..."
+    _clone_if_needed cereal https://github.com/USCiLab/cereal --branch v1.3.2
+    cd "$SRC_ROOT/cereal"
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
