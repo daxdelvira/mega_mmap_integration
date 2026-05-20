@@ -85,18 +85,31 @@ set -e   # re-enable exit-on-error for the build steps
 # ---------------------------------------------------------------------------
 # 0-pre. Boost with fiber  (PACE spack boost omits fiber; build from source)
 # ---------------------------------------------------------------------------
-# Check if a usable boost_fiber cmake config already exists in our install
-if ! _cmake_installed_raw() {
-    [ -f "$INSTALL_ROOT/lib/cmake/boost_fiber-1.*/boost_fiber-config.cmake" ] 2>/dev/null || \
-    [ -f "$INSTALL_ROOT/lib64/cmake/boost_fiber-1.*/boost_fiber-config.cmake" ] 2>/dev/null
-}; then :; fi   # stub — real check below
+# Check that our custom Boost has both fiber and regex cmake configs
+_boost_component_missing() {
+    local comp=$1
+    for _f in "$INSTALL_ROOT"/lib/cmake/boost_${comp}-*/boost_${comp}-config.cmake \
+               "$INSTALL_ROOT"/lib64/cmake/boost_${comp}-*/boost_${comp}-config.cmake; do
+        [ -f "$_f" ] && return 1
+    done
+    return 0
+}
 
-if [ ! -f "$INSTALL_ROOT/lib/cmake/Boost-"*"/BoostConfig.cmake" ] 2>/dev/null && \
-   [ ! -f "$INSTALL_ROOT/lib64/cmake/Boost-"*"/BoostConfig.cmake" ] 2>/dev/null; then
-    echo "==> Building Boost with fiber (PACE spack version lacks fiber)..."
-    cd "$SRC_ROOT"
+_boost_config_missing() {
+    for _f in "$INSTALL_ROOT"/lib/cmake/Boost-*/BoostConfig.cmake \
+               "$INSTALL_ROOT"/lib64/cmake/Boost-*/BoostConfig.cmake; do
+        [ -f "$_f" ] && return 1
+    done
+    return 0
+}
+
+BOOST_LIBS=fiber,context,thread,system,atomic,chrono,date_time,filesystem,regex
+
+if _boost_config_missing || _boost_component_missing fiber || _boost_component_missing regex; then
+    echo "==> Building Boost with fiber+regex (PACE spack version lacks fiber)..."
     BOOST_VER=1_83_0
     BOOST_TAR=boost_${BOOST_VER}.tar.gz
+    cd "$SRC_ROOT"
     if [ ! -f "$BOOST_TAR" ]; then
         curl -L -O "https://archives.boost.io/release/1.83.0/source/$BOOST_TAR"
     fi
@@ -104,12 +117,11 @@ if [ ! -f "$INSTALL_ROOT/lib/cmake/Boost-"*"/BoostConfig.cmake" ] 2>/dev/null &&
         tar xf "$BOOST_TAR"
     fi
     cd "boost_${BOOST_VER}"
-    ./bootstrap.sh --prefix="$INSTALL_ROOT" \
-        --with-libraries=fiber,context,thread,system,atomic,chrono,date_time,filesystem
+    ./bootstrap.sh --prefix="$INSTALL_ROOT" --with-libraries=$BOOST_LIBS
     ./b2 install -j"$(nproc)" variant=release link=shared threading=multi
-    echo "==> Boost with fiber installed"
+    echo "==> Boost with fiber+regex installed"
 else
-    echo "==> Boost (with fiber) already installed, skipping"
+    echo "==> Boost (with fiber+regex) already installed, skipping"
 fi
 
 # Helper: find any cmake config file for a package across common install prefixes
