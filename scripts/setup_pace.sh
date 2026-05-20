@@ -10,7 +10,19 @@
 # After this completes, source the generated env file before running tests:
 #   source $INSTALL_ROOT/mega_env.sh
 
-set -euo pipefail
+set -uo pipefail   # note: no -e here — module commands can return non-zero
+
+# ---------------------------------------------------------------------------
+# Make 'module' available in this non-interactive script
+# ---------------------------------------------------------------------------
+LMOD_INIT=/usr/local/pace-apps/lmod/lmod/init/bash
+if [ -f "$LMOD_INIT" ]; then
+    # Suppress the conda-not-found noise from lmod init
+    source "$LMOD_INIT" 2>/dev/null || true
+else
+    echo "ERROR: lmod init not found at $LMOD_INIT" >&2
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Paths — adjust INSTALL_ROOT if you prefer a different location
@@ -25,17 +37,17 @@ mkdir -p "$INSTALL_ROOT" "$SRC_ROOT"
 # ---------------------------------------------------------------------------
 # Load PACE modules — auto-detect latest available version of each tool
 # ---------------------------------------------------------------------------
-module purge
+module purge 2>/dev/null || true
 
 _load_latest() {
     local name=$1
     local ver
     ver=$(module spider "$name" 2>&1 \
         | grep -oP "${name}/[0-9][^\s]*" \
-        | sort -V | tail -1)
+        | sort -V | tail -1) || true
     if [ -z "$ver" ]; then
         echo "WARNING: no module found for '$name' — skipping" >&2
-        return
+        return 0
     fi
     # Check if this version has prerequisites and load them first
     local prereq
@@ -45,13 +57,13 @@ _load_latest() {
         | grep -v "^--" \
         | grep -E "^\s+\S+/\S+" \
         | head -1 \
-        | xargs)
+        | xargs) || true
     if [ -n "$prereq" ]; then
         echo "==>   loading prerequisite: $prereq (needed by $ver)"
-        module load $prereq
+        module load $prereq 2>&1 || { echo "WARNING: failed to load prereq $prereq" >&2; return 0; }
     fi
     echo "==>   loading $ver"
-    module load "$ver"
+    module load "$ver" 2>&1 || echo "WARNING: failed to load $ver" >&2
 }
 
 _load_latest gcc
@@ -60,6 +72,7 @@ _load_latest openmpi
 _load_latest cuda
 
 echo "==> Modules loaded"
+set -e   # re-enable exit-on-error for the build steps
 
 # ---------------------------------------------------------------------------
 # 1. Hermes
