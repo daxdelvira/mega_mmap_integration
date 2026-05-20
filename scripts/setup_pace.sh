@@ -166,10 +166,9 @@ fi
 # ---------------------------------------------------------------------------
 if [ ! -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] && \
    [ ! -d "$INSTALL_ROOT/include/hermes_shm" ]; then
-    echo "==> Cloning HermesShm..."
-    cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/hyoklee/cte-hermes-shm hermes_shm
-    cd hermes_shm
+    echo "==> Building HermesShm..."
+    _clone_if_needed hermes_shm https://github.com/hyoklee/cte-hermes-shm
+    cd "$SRC_ROOT/hermes_shm"
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -200,7 +199,7 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
         EXTRA_THALLIUM="-Dhermes_enable_rpc_thallium=OFF -DHERMES_ENABLE_THALLIUM=OFF -DHERMES_RPC_THALLIUM=OFF"
     fi
 
-    cd hermes
+    cd "$SRC_ROOT/hermes"
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
