@@ -77,6 +77,7 @@ _load_latest gcc
 _load_latest cmake
 _load_latest openmpi
 _load_latest cuda
+_load_latest boost   # needed by Hermes (Boost::fiber)
 
 echo "==> Modules loaded"
 set -e   # re-enable exit-on-error for the build steps
@@ -201,12 +202,22 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
 
+    # If boost was loaded as a module, its root is in BOOST_ROOT or discoverable
+    # via the spack path; pass it explicitly so FindBoost picks it up.
+    BOOST_HINT=""
+    if [ -n "${BOOST_ROOT:-}" ]; then
+        BOOST_HINT="-DBOOST_ROOT=$BOOST_ROOT"
+    elif [ -n "${EBROOTBOOST:-}" ]; then
+        BOOST_HINT="-DBOOST_ROOT=$EBROOTBOOST"
+    fi
+
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
         -DHermesShm_DIR="$INSTALL_ROOT/cmake" \
-        -DBUILD_TESTING=OFF
+        -DBUILD_TESTING=OFF \
+        $BOOST_HINT
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
