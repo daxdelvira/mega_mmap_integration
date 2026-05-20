@@ -13,6 +13,13 @@
 set -uo pipefail   # note: no -e here — module commands can return non-zero
 
 # ---------------------------------------------------------------------------
+# Kill the GUI askpass helper — headless compute nodes have no display,
+# so git would hang/fail trying to pop a credential dialog.
+# ---------------------------------------------------------------------------
+unset SSH_ASKPASS GIT_ASKPASS DISPLAY 2>/dev/null || true
+export GIT_TERMINAL_PROMPT=0   # fail fast instead of prompting if auth is needed
+
+# ---------------------------------------------------------------------------
 # Make 'module' available in this non-interactive script
 # ---------------------------------------------------------------------------
 LMOD_INIT=/usr/local/pace-apps/lmod/lmod/init/bash
@@ -81,7 +88,7 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] && \
    [ ! -d "$INSTALL_ROOT/include/hermes_shm" ]; then
     echo "==> Cloning HermesShm..."
     cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/grc-iit/hermes_shm hermes_shm || true
+    git clone --depth=1 https://github.com/hyoklee/cte-hermes-shm hermes_shm
     cd hermes_shm
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
@@ -99,7 +106,7 @@ fi
 if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     echo "==> Cloning Hermes (GRC-IIT)..."
     cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/grc-iit/hermes hermes || true
+    git clone --depth=1 https://github.com/grc-iit/hermes hermes
     cd hermes
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
@@ -119,7 +126,7 @@ fi
 if [ ! -d "$INSTALL_ROOT/include/mega_mmap" ]; then
     echo "==> Cloning MegaMmap..."
     cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/grc-iit/mega_mmap mega_mmap || true
+    git clone --depth=1 https://github.com/grc-iit/mega_mmap mega_mmap
     cd mega_mmap
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
