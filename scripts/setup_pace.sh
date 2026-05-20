@@ -82,6 +82,36 @@ _load_latest boost   # needed by Hermes (Boost::fiber)
 echo "==> Modules loaded"
 set -e   # re-enable exit-on-error for the build steps
 
+# ---------------------------------------------------------------------------
+# 0-pre. Boost with fiber  (PACE spack boost omits fiber; build from source)
+# ---------------------------------------------------------------------------
+# Check if a usable boost_fiber cmake config already exists in our install
+if ! _cmake_installed_raw() {
+    [ -f "$INSTALL_ROOT/lib/cmake/boost_fiber-1.*/boost_fiber-config.cmake" ] 2>/dev/null || \
+    [ -f "$INSTALL_ROOT/lib64/cmake/boost_fiber-1.*/boost_fiber-config.cmake" ] 2>/dev/null
+}; then :; fi   # stub — real check below
+
+if [ ! -f "$INSTALL_ROOT/lib/cmake/Boost-"*"/BoostConfig.cmake" ] 2>/dev/null && \
+   [ ! -f "$INSTALL_ROOT/lib64/cmake/Boost-"*"/BoostConfig.cmake" ] 2>/dev/null; then
+    echo "==> Building Boost with fiber (PACE spack version lacks fiber)..."
+    cd "$SRC_ROOT"
+    BOOST_VER=1_83_0
+    BOOST_TAR=boost_${BOOST_VER}.tar.gz
+    if [ ! -f "$BOOST_TAR" ]; then
+        curl -L -O "https://archives.boost.io/release/1.83.0/source/$BOOST_TAR"
+    fi
+    if [ ! -d "boost_${BOOST_VER}" ]; then
+        tar xf "$BOOST_TAR"
+    fi
+    cd "boost_${BOOST_VER}"
+    ./bootstrap.sh --prefix="$INSTALL_ROOT" \
+        --with-libraries=fiber,context,thread,system,atomic,chrono,date_time,filesystem
+    ./b2 install -j"$(nproc)" variant=release link=shared threading=multi
+    echo "==> Boost with fiber installed"
+else
+    echo "==> Boost (with fiber) already installed, skipping"
+fi
+
 # Helper: find any cmake config file for a package across common install prefixes
 _cmake_installed() {
     local pkg=$1; shift          # remaining args are config filenames to check
@@ -202,22 +232,14 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
 
-    # If boost was loaded as a module, its root is in BOOST_ROOT or discoverable
-    # via the spack path; pass it explicitly so FindBoost picks it up.
-    BOOST_HINT=""
-    if [ -n "${BOOST_ROOT:-}" ]; then
-        BOOST_HINT="-DBOOST_ROOT=$BOOST_ROOT"
-    elif [ -n "${EBROOTBOOST:-}" ]; then
-        BOOST_HINT="-DBOOST_ROOT=$EBROOTBOOST"
-    fi
-
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="$INSTALL_ROOT" \
+        "-DCMAKE_PREFIX_PATH=$INSTALL_ROOT" \
         -DHermesShm_DIR="$INSTALL_ROOT/cmake" \
-        -DBUILD_TESTING=OFF \
-        $BOOST_HINT
+        -DBOOST_ROOT="$INSTALL_ROOT" \
+        -DBoost_NO_SYSTEM_PATHS=ON \
+        -DBUILD_TESTING=OFF
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
