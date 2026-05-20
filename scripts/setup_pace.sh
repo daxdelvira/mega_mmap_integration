@@ -187,8 +187,7 @@ fi
 # ---------------------------------------------------------------------------
 if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     echo "==> Cloning Hermes (GRC-IIT)..."
-    cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/grc-iit/hermes hermes
+    _clone_if_needed hermes https://github.com/grc-iit/hermes
 
     # Check if PACE spack has thallium; if so, add it to the prefix path
     THALLIUM_SPACK=$(module spider thallium 2>&1 | grep -oP 'thallium/[^\s]+' | head -1 || true)
@@ -220,10 +219,9 @@ fi
 # 3. MegaMmap
 # ---------------------------------------------------------------------------
 if [ ! -d "$INSTALL_ROOT/include/mega_mmap" ]; then
-    echo "==> Cloning MegaMmap..."
-    cd "$SRC_ROOT"
-    git clone --depth=1 https://github.com/grc-iit/mega_mmap mega_mmap
-    cd mega_mmap
+    echo "==> Building MegaMmap..."
+    _clone_if_needed mega_mmap https://github.com/grc-iit/mega_mmap
+    cd "$SRC_ROOT/mega_mmap"
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
