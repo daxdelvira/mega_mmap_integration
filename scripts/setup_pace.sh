@@ -195,6 +195,9 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     sed -i 's/find_package(thallium REQUIRED/find_package(thallium/g' CMakeLists.txt
     sed -i 's/find_package(thallium)/find_package(thallium QUIET)/g' CMakeLists.txt
 
+    # Wipe any stale build dir so cmake re-reads the patched CMakeLists
+    rm -rf build
+
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
