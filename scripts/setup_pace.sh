@@ -23,13 +23,29 @@ AGENT_HPC_ROOT=${AGENT_HPC_ROOT:-$(realpath "$(dirname "$0")/../..")}
 mkdir -p "$INSTALL_ROOT" "$SRC_ROOT"
 
 # ---------------------------------------------------------------------------
-# Load PACE modules
+# Load PACE modules — auto-detect latest available version of each tool
 # ---------------------------------------------------------------------------
 module purge
-module load gcc/12.3.0
-module load cmake/3.27.7
-module load openmpi/4.1.6
-module load cuda/12.3
+
+_load_latest() {
+    local name=$1
+    # spider output lists versions as "  name/x.y.z"; grab the highest
+    local ver
+    ver=$(module spider "$name" 2>&1 \
+        | grep -oP "${name}/[0-9][^\s]*" \
+        | sort -V | tail -1)
+    if [ -n "$ver" ]; then
+        echo "==>   loading $ver"
+        module load "$ver"
+    else
+        echo "WARNING: no module found for '$name' — skipping" >&2
+    fi
+}
+
+_load_latest gcc
+_load_latest cmake
+_load_latest openmpi
+_load_latest cuda
 
 echo "==> Modules loaded"
 
@@ -113,8 +129,12 @@ export MEGA_NPROCS=1
 export HERMES_INTERCEPTOR=$INSTALL_ROOT/lib/libhermes_posix.so
 export MEGA_WORKDIR_ATOMAGENTS=$SCRATCH/mega_atomagents
 
-# PACE modules (reload in new shells)
-module load gcc/12.3.0 cmake/3.27.7 openmpi/4.1.6 cuda/12.3
+# PACE modules — reload latest available versions in new shells
+for _mod in gcc cmake openmpi cuda; do
+    _ver=\$(module spider "\$_mod" 2>&1 | grep -oP "\${_mod}/[0-9][^\s]*" | sort -V | tail -1)
+    [ -n "\$_ver" ] && module load "\$_ver"
+done
+unset _mod _ver
 EOF
 
 echo ""
