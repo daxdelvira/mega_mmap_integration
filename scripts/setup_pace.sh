@@ -110,7 +110,7 @@ if [ ! -f "$INSTALL_ROOT/lib/cmake/yaml-cpp/yaml-cppConfig.cmake" ] && \
    [ ! -f "$INSTALL_ROOT/share/cmake/yaml-cpp/yaml-cppConfig.cmake" ]; then
     echo "==> Cloning yaml-cpp..."
     cd "$SRC_ROOT"
-    git clone --depth=1 --branch yaml-cpp-0.8.0 https://github.com/jbeder/yaml-cpp yaml-cpp
+    git clone --depth=1 https://github.com/jbeder/yaml-cpp yaml-cpp
     cd yaml-cpp
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
