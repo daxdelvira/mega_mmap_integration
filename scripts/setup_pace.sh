@@ -207,10 +207,30 @@ fi
 # ---------------------------------------------------------------------------
 # 1. HermesShm  (required by Hermes and MegaMmap)
 # ---------------------------------------------------------------------------
-if [ ! -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] && \
-   [ ! -d "$INSTALL_ROOT/include/hermes_shm" ]; then
+# grc-iit/hermes_shm is the canonical version GRC-IIT Hermes expects.
+# hyoklee/cte-hermes-shm is a CTE fork that reorganizes the include tree
+# (lacks data_structures/ipc/pod_array.h) and breaks the Hermes build.
+# Try grc-iit first; only fall back if the clone fails (e.g. auth issue).
+_clone_hermes_shm() {
+    if [ ! -d "$SRC_ROOT/hermes_shm" ]; then
+        echo "    Trying grc-iit/hermes_shm..."
+        git clone --depth=1 https://github.com/grc-iit/hermes_shm "$SRC_ROOT/hermes_shm" 2>/dev/null \
+        || { echo "    grc-iit/hermes_shm unavailable, trying hyoklee/cte-hermes-shm..."; \
+             git clone --depth=1 https://github.com/hyoklee/cte-hermes-shm "$SRC_ROOT/hermes_shm"; }
+    else
+        echo "    (source dir hermes_shm already present, skipping clone)"
+    fi
+}
+
+# Rebuild if pod_array.h is missing (indicates wrong/incomplete install)
+_hermes_shm_complete() {
+    [ -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] \
+    && [ -f "$INSTALL_ROOT/include/hermes_shm/data_structures/ipc/pod_array.h" ]
+}
+
+if ! _hermes_shm_complete; then
     echo "==> Building HermesShm..."
-    _clone_if_needed hermes_shm https://github.com/hyoklee/cte-hermes-shm
+    _clone_hermes_shm
     cd "$SRC_ROOT/hermes_shm"
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
@@ -251,10 +271,7 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
         -DHermesShm_DIR="$INSTALL_ROOT/cmake" \
         -DBOOST_ROOT="$INSTALL_ROOT" \
         -DBoost_NO_SYSTEM_PATHS=ON \
-        -DBUILD_TESTING=OFF \
-        -DHERMES_ENABLE_TESTING=OFF \
-        "-DCMAKE_CXX_FLAGS=-I$INSTALL_ROOT/include" \
-        "-DCMAKE_C_FLAGS=-I$INSTALL_ROOT/include"
+        -DBUILD_TESTING=OFF
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
