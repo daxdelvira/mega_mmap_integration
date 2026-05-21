@@ -251,7 +251,10 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
         -DHermesShm_DIR="$INSTALL_ROOT/cmake" \
         -DBOOST_ROOT="$INSTALL_ROOT" \
         -DBoost_NO_SYSTEM_PATHS=ON \
-        -DBUILD_TESTING=OFF
+        -DBUILD_TESTING=OFF \
+        -DHERMES_ENABLE_TESTING=OFF \
+        "-DCMAKE_CXX_FLAGS=-I$INSTALL_ROOT/include" \
+        "-DCMAKE_C_FLAGS=-I$INSTALL_ROOT/include"
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
