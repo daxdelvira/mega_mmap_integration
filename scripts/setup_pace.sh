@@ -207,24 +207,37 @@ fi
 # ---------------------------------------------------------------------------
 # 1. HermesShm  (required by Hermes and MegaMmap)
 # ---------------------------------------------------------------------------
-# grc-iit/hermes_shm is the canonical version GRC-IIT Hermes expects.
-# hyoklee/cte-hermes-shm is a CTE fork that reorganizes the include tree
-# (lacks data_structures/ipc/pod_array.h) and breaks the Hermes build.
-# Try grc-iit first; only fall back if the clone fails (e.g. auth issue).
+# grc-iit/hermes_shm has pod_array.h and is what grc-iit/hermes was built for.
+# hyoklee/cte-hermes-shm merged iowarp and removed pod_array.h on main.
+# The v0.0.0-alpha tag of hyoklee pre-dates that removal and works correctly.
 _clone_hermes_shm() {
-    if [ ! -d "$SRC_ROOT/hermes_shm" ]; then
-        echo "    Trying grc-iit/hermes_shm..."
-        git clone --depth=1 https://github.com/grc-iit/hermes_shm "$SRC_ROOT/hermes_shm" 2>/dev/null \
-        || { echo "    grc-iit/hermes_shm unavailable, trying hyoklee/cte-hermes-shm..."; \
-             git clone --depth=1 https://github.com/hyoklee/cte-hermes-shm "$SRC_ROOT/hermes_shm"; }
-    else
-        echo "    (source dir hermes_shm already present, skipping clone)"
+    # If source exists and already has pod_array.h, nothing to do
+    if [ -d "$SRC_ROOT/hermes_shm" ] && \
+       git -C "$SRC_ROOT/hermes_shm" cat-file -e \
+           HEAD:include/hermes_shm/data_structures/ipc/pod_array.h 2>/dev/null; then
+        echo "    (hermes_shm source already at correct version)"
+        return
     fi
+    # Wipe any incorrect/partial clone so we can start fresh
+    rm -rf "$SRC_ROOT/hermes_shm"
+    echo "    Trying grc-iit/hermes_shm..."
+    if git clone --depth=1 https://github.com/grc-iit/hermes_shm \
+           "$SRC_ROOT/hermes_shm" 2>/dev/null; then
+        echo "    grc-iit/hermes_shm cloned"
+        return
+    fi
+    # Fall back to the pre-iowarp v0.0.0-alpha tag of hyoklee/cte-hermes-shm.
+    # The current main branch merged iowarp which removed pod_array.h.
+    echo "    grc-iit unavailable; using hyoklee/cte-hermes-shm@v0.0.0-alpha (has pod_array.h)..."
+    git clone --depth=1 --branch v0.0.0-alpha \
+        https://github.com/hyoklee/cte-hermes-shm "$SRC_ROOT/hermes_shm"
 }
 
-# Rebuild if pod_array.h is missing (indicates wrong/incomplete install)
+# Install is complete when pod_array.h and at least one runtime lib are present.
+# hyoklee installs libhermes_shm_host.so; grc-iit installs libhermes_shm_data_structures.so.
 _hermes_shm_complete() {
-    [ -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] \
+    { [ -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] \
+   || [ -f "$INSTALL_ROOT/lib/libhermes_shm_host.so" ]; } \
     && [ -f "$INSTALL_ROOT/include/hermes_shm/data_structures/ipc/pod_array.h" ]
 }
 
