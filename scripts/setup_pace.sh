@@ -287,6 +287,19 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
 
+    # Detect MPI wrappers from the loaded openmpi module.
+    # CMAKE_PREFIX_PATH=$INSTALL_ROOT hides the system MPI paths, so we
+    # must pass the wrapper paths explicitly for FindMPI to work.
+    _MPI_CXX=$(command -v mpicxx 2>/dev/null || true)
+    _MPI_CC=$(command -v mpicc 2>/dev/null || true)
+    _MPI_ARGS=()
+    if [ -n "$_MPI_CXX" ] && [ -n "$_MPI_CC" ]; then
+        _MPI_ARGS=(-DMPI_CXX_COMPILER="$_MPI_CXX" -DMPI_C_COMPILER="$_MPI_CC")
+        echo "==>   MPI wrappers: $_MPI_CXX / $_MPI_CC"
+    else
+        echo "WARNING: mpicxx/mpicc not in PATH — hermes_posix adapter may fail to configure" >&2
+    fi
+
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -295,7 +308,8 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
         -DBOOST_ROOT="$INSTALL_ROOT" \
         -DBoost_NO_SYSTEM_PATHS=ON \
         -DBUILD_MPI_TESTS=OFF \
-        -DBUILD_OpenMP_TESTS=OFF
+        -DBUILD_OpenMP_TESTS=OFF \
+        "${_MPI_ARGS[@]}"
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
