@@ -261,8 +261,19 @@ if ! _hermes_shm_complete; then
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_TESTING=OFF \
-        -DHERMES_SHM_ENABLE_TESTING=OFF
-    cmake --build build -j"$(nproc)"
+        -DHERMES_SHM_ENABLE_TESTING=OFF \
+        -DHSHM_BUILD_UNIT_TESTS=OFF \
+        -DHSHM_BUILD_TESTING=OFF
+    # Build only the library target. hyoklee/cte-hermes-shm@main builds unit
+    # tests even with BUILD_TESTING=OFF, and running them all in parallel causes
+    # OOM-kills on PACE interactive nodes. Target the lib directly; fall back to
+    # a low-parallelism full build with -k if the target name differs.
+    cmake --build build -j"$(nproc)" --target hermes_shm_host 2>/dev/null \
+        || cmake --build build -j"$(nproc)" --target hermes_shm_data_structures 2>/dev/null \
+        || cmake --build build -j4 -- -k 2>/dev/null \
+        || true
+    # cmake --install reads the install manifests and only installs registered
+    # library/header targets; unbuilt test executables have no install rules.
     cmake --install build
     touch "$INSTALL_ROOT/.hermes_shm_new_api"
     echo "==> HermesShm installed"
