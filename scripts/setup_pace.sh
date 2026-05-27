@@ -288,6 +288,11 @@ _inject_stub "$_DS/ipc/mpsc_queue.h" \
 _inject_stub "$_DS/ipc/mpsc_ptr_queue.h" \
     '#pragma once' '#include "ring_ptr_queue.h"'
 
+# ipc/internal/ subdir: v0.0.0-alpha keeps shm_internal.h one level up at internal/
+mkdir -p "$_DS/ipc/internal"
+_inject_stub "$_DS/ipc/internal/shm_internal.h" \
+    '#pragma once' '#include "../../internal/shm_internal.h"'
+
 # serialization/shm_serialize.h renamed to local_serialize.h in v0.0.0-alpha
 _inject_stub "$_DS/serialization/shm_serialize.h" \
     '#pragma once' \
