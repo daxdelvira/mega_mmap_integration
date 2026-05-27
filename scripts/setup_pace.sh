@@ -304,6 +304,89 @@ _inject_stub "$_DS/containers/charbuf.h" \
 _inject_stub "$_DS/containers/converters.h" \
     '#pragma once' '/* converters provided transitively via data_structure.h -> all.h */'
 
+# thallium.hpp: PACE has no Argobots/Mercury/Margo. Provide a minimal stub so
+# task.h (and other code that #include <thallium.hpp>) compiles cleanly.
+# Thallium types are used for RPC serialization; stub makes them no-ops.
+_THALLIUM_H="$INSTALL_ROOT/include/thallium.hpp"
+if [ ! -f "$_THALLIUM_H" ]; then
+    cat > "$_THALLIUM_H" << 'THEOF'
+#pragma once
+// Minimal thallium stub: PACE has no Argobots/Mercury/Margo.
+// Provides empty type shells so grc-iit/hermes compiles; RPC calls are no-ops.
+#include <string>
+#include <functional>
+#include <cstdint>
+
+namespace thallium {
+
+struct endpoint {
+  bool is_null() const { return true; }
+  operator bool() const { return false; }
+  std::string get_addr() const { return ""; }
+};
+
+struct bulk { operator bool() const { return false; } };
+struct local_bulk {};
+struct remote_bulk { operator bool() const { return false; } };
+
+class pool { public: pool() = default; };
+class xstream {
+ public:
+  static xstream& self() { static xstream s; return s; }
+};
+
+class engine {
+ public:
+  engine() = default;
+  template<typename... A> engine(A&&...) {}
+  void finalize() {}
+  void wait_for_finalize() {}
+  endpoint self() const { return {}; }
+  endpoint lookup(const std::string&) const { return {}; }
+  bool progress_needed() const { return false; }
+  std::string self_addr() const { return ""; }
+  operator bool() const { return false; }
+  template<typename F> void define(const std::string&, F&&) {}
+  template<typename F> void define(const std::string&, F&&, pool&) {}
+};
+
+class request {
+ public:
+  endpoint get_endpoint() const { return {}; }
+  template<typename... T> void respond(T&&...) const {}
+  void disable_response() const {}
+};
+
+// Serialization archive stubs (thallium uses cereal-style ar & field)
+class proc_input {
+ public:
+  template<typename T> proc_input& operator>>(T&) { return *this; }
+  template<typename T> proc_input& operator&(T&) { return *this; }
+};
+class proc_output {
+ public:
+  template<typename T> proc_output& operator<<(const T&) { return *this; }
+  template<typename T> proc_output& operator&(T&) { return *this; }
+};
+using input_archive  = proc_input;
+using output_archive = proc_output;
+
+template<typename... T> struct remote_procedure {
+  remote_procedure() = default;
+  template<typename... A> remote_procedure(A&&...) {}
+};
+
+} // namespace thallium
+
+namespace tl = thallium;
+
+// Hermes uses these serialization macros from thallium/cereal
+#define THALLIUM_DEFINE_SERIALIZE(...)
+#define THALLIUM_SERIALIZE(...)
+THEOF
+    echo "    Created thallium.hpp stub at $_THALLIUM_H"
+fi
+
 # config_parse.h in v0.0.0-alpha doesn't include logging.h, so HILOG is not
 # in scope when grc-iit/hermes config.h compiles. Also, v0.0.0-alpha's HILOG
 # uses a different signature (SUB_CODE, ...) vs the new (verbosity, ...).
@@ -395,7 +478,14 @@ DEPSEOF
         -DBUILD_MPI_TESTS=OFF \
         -DBUILD_OpenMP_TESTS=OFF \
         "-DCMAKE_PROJECT_INCLUDE=$_DEPS_INJECT"
-    cmake --build build -j"$(nproc)"
+    # -k: keep going past test/tool linker errors so core libs always build
+    cmake --build build -j"$(nproc)" -- -k 2>&1 | tee /tmp/hermes_build.log || true
+    # Verify the essential outputs before installing
+    if [ ! -f build/src/libhermes.so ] && [ ! -f build/hermes_adapters/posix/libhermes_posix.so ]; then
+        echo "ERROR: hermes core libraries not built — see /tmp/hermes_build.log" >&2
+        grep -i "error:" /tmp/hermes_build.log | grep -v "^--" | head -20 >&2
+        exit 1
+    fi
     cmake --install build
     echo "==> Hermes installed"
 else
