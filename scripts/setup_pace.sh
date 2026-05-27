@@ -517,20 +517,6 @@ if [ -f "$_MACROS_H" ]; then
     fi
 fi
 
-# grc-iit/hermes@master calls HSHM_THREAD_MODEL->SetThreadModel(kPthread) but
-# v0.0.0-alpha's Pthread class has no SetThreadModel method.  Add a no-op.
-_PTHREAD_H="$INSTALL_ROOT/include/hermes_shm/thread/pthread.h"
-if [ -f "$_PTHREAD_H" ] && ! grep -q 'SetThreadModel' "$_PTHREAD_H"; then
-    awk '/class Pthread/ { in_class=1 }
-         in_class && /void Init\(\)/ {
-             print "  void SetThreadModel(int) {}"
-             in_class=0
-         }
-         { print }' "$_PTHREAD_H" > "${_PTHREAD_H}.tmp" \
-        && mv "${_PTHREAD_H}.tmp" "$_PTHREAD_H"
-    echo "    Patched pthread.h: added SetThreadModel no-op"
-fi
-
 # PACE has no Argobots. HRUN task-scheduler code calls ABT_thread_yield() and
 # friends via #include <abt.h>. Provide a minimal stub so compilation succeeds.
 _ABT_H="$INSTALL_ROOT/include/abt.h"
@@ -615,6 +601,14 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
         sed -i 's/find_package(thallium CONFIG REQUIRED)/find_package(thallium CONFIG QUIET)/g' {} +
     sed -i 's/find_package(thallium CONFIG REQUIRED)/find_package(thallium CONFIG QUIET)/g' \
         "$INSTALL_ROOT/cmake/HermesShmCommonConfig.cmake"
+
+    # hrun_client.h:67 calls SetThreadModel which hyoklee's Pthread class lacks.
+    # Remove the call; thread model defaults to pthread without explicit setting.
+    _HRUN_CLIENT_H="$SRC_ROOT/hermes/hrun/include/hrun/api/hrun_client.h"
+    if [ -f "$_HRUN_CLIENT_H" ]; then
+        sed -i '/HSHM_THREAD_MODEL->SetThreadModel/d' "$_HRUN_CLIENT_H"
+        echo "    Patched hrun_client.h: removed SetThreadModel call"
+    fi
 
     # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
