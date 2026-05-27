@@ -287,29 +287,43 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
 
-    # Detect MPI wrappers from the loaded openmpi module.
-    # CMAKE_PREFIX_PATH=$INSTALL_ROOT hides the system MPI paths, so we
-    # must pass the wrapper paths explicitly for FindMPI to work.
-    _MPI_CXX=$(command -v mpicxx 2>/dev/null || true)
-    _MPI_CC=$(command -v mpicc 2>/dev/null || true)
-    _MPI_ARGS=()
-    if [ -n "$_MPI_CXX" ] && [ -n "$_MPI_CC" ]; then
-        _MPI_ARGS=(-DMPI_CXX_COMPILER="$_MPI_CXX" -DMPI_C_COMPILER="$_MPI_CC")
-        echo "==>   MPI wrappers: $_MPI_CXX / $_MPI_CC"
-    else
-        echo "WARNING: mpicxx/mpicc not in PATH — hermes_posix adapter may fail to configure" >&2
+    # Detect MPI root from the loaded openmpi lmod module or from the wrapper path.
+    # Add it to CMAKE_PREFIX_PATH so FindMPI can locate headers and libs.
+    _MPI_ROOT=""
+    for _var in MPI_HOME OPENMPI_DIR OPENMPI_HOME MPIDIR OMPI_DIR; do
+        eval "_val=\${${_var}:-}"
+        if [ -n "$_val" ]; then
+            _MPI_ROOT="$_val"
+            echo "==>   MPI root from \$$_var: $_MPI_ROOT"
+            break
+        fi
+    done
+    if [ -z "$_MPI_ROOT" ] && command -v mpicxx &>/dev/null; then
+        _MPI_ROOT=$(cd "$(dirname "$(which mpicxx)")/.." && pwd)
+        echo "==>   MPI root from mpicxx: $_MPI_ROOT"
     fi
+    [ -z "$_MPI_ROOT" ] && echo "WARNING: cannot detect MPI root — hermes_posix may fail" >&2
+
+    # v0.0.0-alpha hermes_shm doesn't export MPI::MPI_CXX transitively (the
+    # grc-iit version does).  Inject find_package(MPI) via CMAKE_PROJECT_INCLUDE
+    # so it runs right after any project() call before adapter targets are defined.
+    _MPI_INJECT="$SRC_ROOT/hermes/mpi_inject.cmake"
+    cat > "$_MPI_INJECT" << 'MPIEOF'
+if(NOT TARGET MPI::MPI_CXX)
+    find_package(MPI REQUIRED COMPONENTS CXX C)
+endif()
+MPIEOF
 
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
-        "-DCMAKE_PREFIX_PATH=$INSTALL_ROOT" \
+        "-DCMAKE_PREFIX_PATH=$INSTALL_ROOT${_MPI_ROOT:+;$_MPI_ROOT}" \
         -DHermesShm_DIR="$INSTALL_ROOT/cmake" \
         -DBOOST_ROOT="$INSTALL_ROOT" \
         -DBoost_NO_SYSTEM_PATHS=ON \
         -DBUILD_MPI_TESTS=OFF \
         -DBUILD_OpenMP_TESTS=OFF \
-        "${_MPI_ARGS[@]}"
+        "-DCMAKE_PROJECT_INCLUDE=$_MPI_INJECT"
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
