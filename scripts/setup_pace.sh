@@ -307,12 +307,16 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     # v0.0.0-alpha hermes_shm doesn't export MPI::MPI_CXX transitively (the
     # grc-iit version does).  Inject find_package(MPI) via CMAKE_PROJECT_INCLUDE
     # so it runs right after any project() call before adapter targets are defined.
-    _MPI_INJECT="$SRC_ROOT/hermes/mpi_inject.cmake"
-    cat > "$_MPI_INJECT" << 'MPIEOF'
+    _DEPS_INJECT="$SRC_ROOT/hermes/deps_inject.cmake"
+    cat > "$_DEPS_INJECT" << 'DEPSEOF'
+# v0.0.0-alpha hermes_shm doesn't transitively export MPI or OpenMP targets.
 if(NOT TARGET MPI::MPI_CXX)
     find_package(MPI REQUIRED COMPONENTS CXX C)
 endif()
-MPIEOF
+if(NOT TARGET OpenMP::OpenMP_CXX)
+    find_package(OpenMP REQUIRED COMPONENTS CXX C)
+endif()
+DEPSEOF
 
     cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
@@ -323,7 +327,7 @@ MPIEOF
         -DBoost_NO_SYSTEM_PATHS=ON \
         -DBUILD_MPI_TESTS=OFF \
         -DBUILD_OpenMP_TESTS=OFF \
-        "-DCMAKE_PROJECT_INCLUDE=$_MPI_INJECT"
+        "-DCMAKE_PROJECT_INCLUDE=$_DEPS_INJECT"
     cmake --build build -j"$(nproc)"
     cmake --install build
     echo "==> Hermes installed"
