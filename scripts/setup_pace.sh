@@ -267,6 +267,43 @@ if [ ! -f "$_DATA_STRUCT_H" ]; then
     echo "    data_structure.h injected at $_DATA_STRUCT_H"
 fi
 
+# grc-iit/hermes@master was written against a newer hermes_shm that split queue
+# types into individual files and added a containers/ directory. v0.0.0-alpha
+# keeps them in ring_queue.h / ring_ptr_queue.h / ipc/. Stub the missing paths.
+_DS="$INSTALL_ROOT/include/hermes_shm/data_structures"
+mkdir -p "$_DS/containers"
+
+_inject_stub() {
+    local dst=$1; shift
+    [ -f "$dst" ] && return 0
+    printf '%s\n' "$@" > "$dst"
+    echo "    stubbed: $dst"
+}
+
+echo "==> Injecting missing hermes_shm API shims..."
+
+# ipc/ queue headers split out from ring_queue/ring_ptr_queue in newer versions
+_inject_stub "$_DS/ipc/mpsc_queue.h" \
+    '#pragma once' '#include "ring_queue.h"'
+_inject_stub "$_DS/ipc/mpsc_ptr_queue.h" \
+    '#pragma once' '#include "ring_ptr_queue.h"'
+
+# serialization/shm_serialize.h renamed to local_serialize.h in v0.0.0-alpha
+_inject_stub "$_DS/serialization/shm_serialize.h" \
+    '#pragma once' \
+    '#include "local_serialize.h"' \
+    '#include "serialize_common.h"'
+
+# containers/ directory didn't exist; types are in ipc/ (or already in all.h)
+_inject_stub "$_DS/containers/spsc_queue.h" \
+    '#pragma once' '#include "../ipc/ring_queue.h"'
+_inject_stub "$_DS/containers/split_ticket_queue.h" \
+    '#pragma once' '#include "../ipc/split_ticket_queue.h"'
+_inject_stub "$_DS/containers/charbuf.h" \
+    '#pragma once' '#include "../ipc/chararr.h"'
+_inject_stub "$_DS/containers/converters.h" \
+    '#pragma once' '/* converters provided transitively via data_structure.h -> all.h */'
+
 # ---------------------------------------------------------------------------
 # 2. Hermes (GRC-IIT version — NOT HDF Group's Hermes)
 # ---------------------------------------------------------------------------
