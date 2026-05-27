@@ -326,10 +326,12 @@ with open(path) as f:
 if '_as_def_()' in txt:
     sys.exit(0)
 COMPAT = r"""
+ public:
   // compat bridge — added by setup_pace.sh
   // grc-iit/hermes@master calls these on Allocator*; post-iowarp moved them
-  // to BaseAllocator<CoreAllocT>.  Cast to the default concrete type and forward.
-  // Bodies see BaseAllocator at instantiation time (defined later in this header).
+  // to BaseAllocator<CoreAllocT>.  Forward via static_cast to concrete subtype.
+  // BaseAllocator is forward-declared before this class so the typedef resolves
+  // at definition time; the full definition is in scope at instantiation time.
   void _as_def_() {}  // sentinel for grep guard only
   template<typename T, typename PointerT = Pointer, typename... Args>
   inline T* NewObj(const MemContext &ctx, PointerT &p, Args &&...args) {
@@ -358,18 +360,20 @@ COMPAT = r"""
   inline void DelObjLocal(const MemContext &ctx, PtrT &ptr) {
     typedef BaseAllocator<_ThreadLocalAllocator> DA_;
     static_cast<DA_*>(this)->template DelObjLocal<T>(ctx, ptr); }
-  template<typename T, typename PointerT = Pointer>
-  inline T* Convert(const PointerT &p) {
+  inline void Free(const Pointer &p) {
     typedef BaseAllocator<_ThreadLocalAllocator> DA_;
-    return static_cast<DA_*>(this)->template Convert<T, PointerT>(p); }
-  template<typename T, typename PtrT>
+    static_cast<DA_*>(this)->Free(p); }
+  template<typename PtrT>
   inline void FreeLocalPtr(PtrT &ptr) {
     typedef BaseAllocator<_ThreadLocalAllocator> DA_;
-    static_cast<DA_*>(this)->template FreeLocalPtr<T>(ptr); }
+    static_cast<DA_*>(this)->FreeLocalPtr(ptr); }
 """
 m = re.search(r'class Allocator\b[^{]*\{', txt)
 if m:
-    txt = txt[:m.end()] + COMPAT + txt[m.end():]
+    fwd = 'template<typename CoreAllocT> class BaseAllocator;  // compat fwd decl\n'
+    txt = txt[:m.start()] + fwd + txt[m.start():]
+    m2 = re.search(r'class Allocator\b[^{]*\{', txt)
+    txt = txt[:m2.end()] + COMPAT + txt[m2.end():]
 CTX_CTOR = '\n  CtxAllocator(Allocator *a) : alloc_(static_cast<AllocT*>(a)), ctx_() {}'
 txt = txt.replace(
     'CtxAllocator(AllocT *alloc) : alloc_(alloc), ctx_() {}',
@@ -761,6 +765,7 @@ endif()
 DEPSEOF
 
     cmake -S . -B build \
+        -Wno-dev \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
         -DCMAKE_BUILD_TYPE=Release \
         "-DCMAKE_PREFIX_PATH=$INSTALL_ROOT${_MPI_ROOT:+;$_MPI_ROOT}" \
