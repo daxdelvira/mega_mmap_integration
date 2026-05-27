@@ -424,6 +424,7 @@ fi
 _DATA_STRUCT_H="$INSTALL_ROOT/include/hermes_shm/data_structures/data_structure.h"
 if [ ! -f "$_DATA_STRUCT_H" ]; then
     echo "==> Injecting missing data_structure.h (forwards to all.h)..."
+    mkdir -p "$(dirname "$_DATA_STRUCT_H")"
     printf '#ifndef HERMES_DATA_STRUCTURES_DATA_STRUCTURE_H_\n#define HERMES_DATA_STRUCTURES_DATA_STRUCTURE_H_\n#include "all.h"\n#endif\n' \
         > "$_DATA_STRUCT_H"
     echo "    data_structure.h injected at $_DATA_STRUCT_H"
