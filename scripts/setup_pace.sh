@@ -308,18 +308,30 @@ _inject_stub "$_DS/containers/converters.h" \
 # in scope when grc-iit/hermes config.h compiles. Also, v0.0.0-alpha's HILOG
 # uses a different signature (SUB_CODE, ...) vs the new (verbosity, ...).
 # Patch config_parse.h: include logging.h, then redefine HILOG as a no-op.
+# config_parse.h already includes logging.h in v0.0.0-alpha, but logging.h's
+# HILOG expands to HLOG(...) which is never defined, causing "expected ';'"
+# errors. Redefine HILOG as a no-op immediately after the logging.h include.
 _CONFIG_PARSE="$INSTALL_ROOT/include/hermes_shm/util/config_parse.h"
-if ! grep -q 'logging.h' "$_CONFIG_PARSE"; then
-    awk '/^#define HSHM_CONFIG_PARSE_PARSER_H$/ {
+if ! grep -q '#define HILOG(...)' "$_CONFIG_PARSE"; then
+    awk '/#include "logging.h"/ {
         print
-        print "#include \"logging.h\""
-        print "// HILOG compat: v0.0.0-alpha signature differs; new API is HILOG(verbosity,...)"
+        print "// HILOG compat: v0.0.0-alpha HILOG expands to HLOG which is undefined;"
+        print "// redefine as no-op to match new (verbosity,...) calling convention."
         print "#undef HILOG"
         print "#define HILOG(...)"
         next
     } { print }' "$_CONFIG_PARSE" > "${_CONFIG_PARSE}.tmp" \
         && mv "${_CONFIG_PARSE}.tmp" "$_CONFIG_PARSE"
-    echo "    Patched config_parse.h: added logging.h + HILOG no-op"
+    echo "    Patched config_parse.h: HILOG no-op after logging.h"
+fi
+
+# v0.0.0-alpha macros.h uses HSHM_INLINE; grc-iit/hermes@master uses
+# HSHM_ALWAYS_INLINE. Add the alias to macros.h.
+_MACROS_H="$INSTALL_ROOT/include/hermes_shm/constants/macros.h"
+if ! grep -q 'HSHM_ALWAYS_INLINE' "$_MACROS_H"; then
+    printf '\n// Compatibility alias: newer hermes uses HSHM_ALWAYS_INLINE\n#define HSHM_ALWAYS_INLINE HSHM_INLINE\n' \
+        >> "$_MACROS_H"
+    echo "    Patched macros.h: HSHM_ALWAYS_INLINE -> HSHM_INLINE"
 fi
 
 # ---------------------------------------------------------------------------
