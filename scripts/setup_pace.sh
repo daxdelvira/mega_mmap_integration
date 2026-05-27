@@ -517,6 +517,20 @@ if [ -f "$_MACROS_H" ]; then
     fi
 fi
 
+# grc-iit/hermes@master calls HSHM_THREAD_MODEL->SetThreadModel(kPthread) but
+# v0.0.0-alpha's Pthread class has no SetThreadModel method.  Add a no-op.
+_PTHREAD_H="$INSTALL_ROOT/include/hermes_shm/thread/pthread.h"
+if [ -f "$_PTHREAD_H" ] && ! grep -q 'SetThreadModel' "$_PTHREAD_H"; then
+    awk '/class Pthread/ { in_class=1 }
+         in_class && /void Init\(\)/ {
+             print "  void SetThreadModel(int) {}"
+             in_class=0
+         }
+         { print }' "$_PTHREAD_H" > "${_PTHREAD_H}.tmp" \
+        && mv "${_PTHREAD_H}.tmp" "$_PTHREAD_H"
+    echo "    Patched pthread.h: added SetThreadModel no-op"
+fi
+
 # PACE has no Argobots. HRUN task-scheduler code calls ABT_thread_yield() and
 # friends via #include <abt.h>. Provide a minimal stub so compilation succeeds.
 _ABT_H="$INSTALL_ROOT/include/abt.h"
