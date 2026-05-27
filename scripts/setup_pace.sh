@@ -351,6 +351,50 @@ _inject_stub "$_DS/containers/charbuf.h" \
 _inject_stub "$_DS/containers/converters.h" \
     '#pragma once' '/* converters provided transitively via data_structure.h -> all.h */'
 
+# pod_array.h existed in v0.0.0-alpha but was removed from @main.
+# hrun/include/hrun/hrun_types.h:25 requires it. Provide a std::vector-backed
+# stub that satisfies the interface hermes uses (operator[], size, Init, etc.).
+_POD_ARRAY_H="$_DS/ipc/pod_array.h"
+if [ ! -f "$_POD_ARRAY_H" ]; then
+    cat > "$_POD_ARRAY_H" << 'PODARRAYEOF'
+#pragma once
+#include <vector>
+#include <cstddef>
+
+namespace hshm { namespace ipc {
+
+template<typename T>
+class PodArray {
+  std::vector<T> data_;
+ public:
+  PodArray() = default;
+  explicit PodArray(size_t n) : data_(n) {}
+
+  T& operator[](size_t i) { return data_[i]; }
+  const T& operator[](size_t i) const { return data_[i]; }
+  size_t size() const { return data_.size(); }
+  bool empty() const { return data_.empty(); }
+  T* data() { return data_.data(); }
+  const T* data() const { return data_.data(); }
+  void resize(size_t n) { data_.resize(n); }
+  void emplace_back(const T& v) { data_.push_back(v); }
+  void push_back(const T& v) { data_.push_back(v); }
+  void clear() { data_.clear(); }
+  T* begin() { return data_.data(); }
+  T* end() { return data_.data() + data_.size(); }
+  const T* begin() const { return data_.data(); }
+  const T* end() const { return data_.data() + data_.size(); }
+
+  // SHM alloc-based construction shim (no-op; data lives on heap)
+  template<typename AllocT> void Init(AllocT*, size_t n) { data_.resize(n); }
+  void shm_destroy() {}
+};
+
+}}  // namespace hshm::ipc
+PODARRAYEOF
+    echo "    stubbed: $_POD_ARRAY_H"
+fi
+
 # thallium.hpp: PACE has no Argobots/Mercury/Margo. Provide a minimal stub so
 # task.h (and other code that #include <thallium.hpp>) compiles cleanly.
 # Thallium types are used for RPC serialization; stub makes them no-ops.
