@@ -225,12 +225,12 @@ _clone_hermes_shm() {
         echo "    grc-iit/hermes_shm cloned"
         return
     fi
-    # hyoklee/cte-hermes-shm@main merged iowarp and has the same post-iowarp API
-    # surface (SHM_CONTAINER_TEMPLATE, CtxAllocator, containers/, etc.) that
-    # grc-iit/hermes@master expects. v0.0.0-alpha predates iowarp and has deep
-    # API mismatches with grc-iit/hermes@master.
-    echo "    grc-iit unavailable; using hyoklee/cte-hermes-shm@main (post-iowarp API)..."
-    git clone --depth=1 --branch main \
+    # grc-iit/hermes@master uses the pre-iowarp Allocator* API (NewObj on Allocator,
+    # non-template GetAllocator, allocator_id_ fields, etc.).  hyoklee@main moved
+    # all allocation to CtxAllocator<AllocT>, which is architecturally incompatible.
+    # v0.0.0-alpha still has the pre-iowarp Allocator* interface that matches.
+    echo "    grc-iit unavailable; using hyoklee/cte-hermes-shm@v0.0.0-alpha..."
+    git clone --depth=1 --branch v0.0.0-alpha \
         https://github.com/hyoklee/cte-hermes-shm "$SRC_ROOT/hermes_shm"
 }
 
@@ -244,8 +244,8 @@ _hermes_shm_complete() {
 }
 
 if ! _hermes_shm_complete; then
-    echo "==> Building HermesShm (post-iowarp)..."
-    # Wipe any stale v0.0.0-alpha headers/libs so they don't pollute the build.
+    echo "==> Building HermesShm (v0.0.0-alpha, pre-iowarp API)..."
+    # Wipe any stale headers/libs so they don't pollute the fresh build.
     # Also clear the hermes install so it relinks against the new shm libs.
     rm -rf "$INSTALL_ROOT/include/hermes_shm" \
            "$INSTALL_ROOT/cmake/HermesShmCommon"* \
@@ -564,11 +564,15 @@ fi
 # GetAllocator, and shm_destroy members.  Provide a stub header force-included
 # via -include so every TU sees the definition before it is used.
 _COMPAT_H="$INSTALL_ROOT/include/hermes_compat.h"
-if [ ! -f "$_COMPAT_H" ]; then
+if [ ! -f "$_COMPAT_H" ] || ! grep -q '#include <abt.h>' "$_COMPAT_H"; then
     cat > "$_COMPAT_H" << 'COMPATEOF'
 #pragma once
-// SHM_CONTAINER_TEMPLATE was removed in post-iowarp hermes_shm but
-// grc-iit/hermes@master still uses it inside class bodies.
+// Force-included via -include so every TU sees these definitions.
+// ABT_thread_yield is called in template bodies; GCC phase-1 lookup requires
+// the declaration to be visible at the template definition point.
+#include <abt.h>
+// SHM_CONTAINER_TEMPLATE was removed from newer hermes_shm but
+// grc-iit/hermes@master uses it inside class bodies.
 #ifndef SHM_CONTAINER_TEMPLATE
 #define SHM_CONTAINER_TEMPLATE(CLASS_NAME, TYPED_CLASS)                            \
  public:                                                                            \
@@ -578,7 +582,7 @@ if [ ! -f "$_COMPAT_H" ]; then
   inline void shm_destroy() {}
 #endif
 COMPATEOF
-    echo "    Created hermes_compat.h at $_COMPAT_H"
+    echo "    Created/updated hermes_compat.h at $_COMPAT_H"
 fi
 
 # ---------------------------------------------------------------------------
@@ -600,39 +604,6 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
 
     # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
-
-    # Patch hermes source files for post-iowarp hermes_shm API changes.
-    # Sed is idempotent: if a string is already replaced there's nothing to match.
-
-    # 1. Singleton macros renamed: HERMES_ -> HSHM_
-    find . \( -name "*.h" -o -name "*.cc" \) \
-        | xargs sed -i \
-            -e 's/HERMES_THREAD_MODEL/HSHM_THREAD_MODEL/g' \
-            -e 's/HERMES_MEMORY_MANAGER/HSHM_MEMORY_MANAGER/g' \
-            2>/dev/null || true
-
-    # 2. Pointer struct field renamed: .allocator_id_ -> .alloc_id_
-    find . \( -name "*.h" -o -name "*.cc" \) \
-        | xargs sed -i 's/\.allocator_id_/.alloc_id_/g' 2>/dev/null || true
-
-    # 3. Allocator ID type renamed: hipc::allocator_id_t -> hipc::AllocatorId
-    find . \( -name "*.h" -o -name "*.cc" \) \
-        | xargs sed -i 's/hipc::allocator_id_t/hipc::AllocatorId/g' 2>/dev/null || true
-
-    # 4. hrun_client.h: post-iowarp NewObj/NewObjLocal/DelObj/AllocateLocalPtr
-    #    all require a MemContext as their first argument.
-    _HRUN_CLIENT="hrun/include/hrun/api/hrun_client.h"
-    if [ -f "$_HRUN_CLIENT" ]; then
-        sed -i \
-            -e 's/->NewObj<TaskT>(p, main_alloc_)/->NewObj<TaskT>(hshm::ipc::MemContext(), p)/g' \
-            -e 's/->NewObjLocal<TaskT>(main_alloc_)/->NewObjLocal<TaskT>(hshm::ipc::MemContext())/g' \
-            -e 's/main_alloc_, task_node,/hshm::ipc::MemContext(), task_node,/g' \
-            -e 's/->DelObj<TaskT>(task)/->DelObj<TaskT>(hshm::ipc::MemContext(), task)/g' \
-            -e 's/->DelObjLocal<TaskT>(task)/->DelObjLocal<TaskT>(hshm::ipc::MemContext(), task)/g' \
-            -e 's/AllocateLocalPtr<char>(size)/AllocateLocalPtr<char>(hshm::ipc::MemContext(), size)/g' \
-            "$_HRUN_CLIENT"
-        echo "    Patched hrun_client.h: MemContext first-arg insertions"
-    fi
 
     # Detect MPI root from the loaded openmpi lmod module or from the wrapper path.
     # Add it to CMAKE_PREFIX_PATH so FindMPI can locate headers and libs.
