@@ -207,42 +207,54 @@ fi
 # ---------------------------------------------------------------------------
 # 1. HermesShm  (required by Hermes and MegaMmap)
 # ---------------------------------------------------------------------------
-# grc-iit/hermes_shm has pod_array.h and is what grc-iit/hermes was built for.
-# hyoklee/cte-hermes-shm merged iowarp and removed pod_array.h on main.
-# The v0.0.0-alpha tag of hyoklee pre-dates that removal and works correctly.
+# grc-iit/hermes@master expects the post-iowarp hermes_shm API.
+# grc-iit/hermes_shm is tried first; if inaccessible, fall back to
+# hyoklee/cte-hermes-shm@main which merged iowarp and has the same API surface.
 _clone_hermes_shm() {
-    # If source exists and already has pod_array.h, nothing to do
+    # Post-iowarp hermes_shm has a containers/ subdir; v0.0.0-alpha does not.
     if [ -d "$SRC_ROOT/hermes_shm" ] && \
-       git -C "$SRC_ROOT/hermes_shm" cat-file -e \
-           HEAD:include/hermes_shm/data_structures/ipc/pod_array.h 2>/dev/null; then
-        echo "    (hermes_shm source already at correct version)"
+       [ -d "$SRC_ROOT/hermes_shm/include/hermes_shm/data_structures/containers" ]; then
+        echo "    (hermes_shm source already at post-iowarp version)"
         return
     fi
-    # Wipe any incorrect/partial clone so we can start fresh
+    # Wipe v0.0.0-alpha or any stale/partial clone before re-cloning
     rm -rf "$SRC_ROOT/hermes_shm"
-    echo "    Trying grc-iit/hermes_shm..."
+    echo "    Trying grc-iit/hermes_shm (authoritative post-iowarp source)..."
     if git clone --depth=1 https://github.com/grc-iit/hermes_shm \
            "$SRC_ROOT/hermes_shm" 2>/dev/null; then
         echo "    grc-iit/hermes_shm cloned"
         return
     fi
-    # Fall back to the pre-iowarp v0.0.0-alpha tag of hyoklee/cte-hermes-shm.
-    # The current main branch merged iowarp which removed pod_array.h.
-    echo "    grc-iit unavailable; using hyoklee/cte-hermes-shm@v0.0.0-alpha (has pod_array.h)..."
-    git clone --depth=1 --branch v0.0.0-alpha \
+    # hyoklee/cte-hermes-shm@main merged iowarp and has the same post-iowarp API
+    # surface (SHM_CONTAINER_TEMPLATE, CtxAllocator, containers/, etc.) that
+    # grc-iit/hermes@master expects. v0.0.0-alpha predates iowarp and has deep
+    # API mismatches with grc-iit/hermes@master.
+    echo "    grc-iit unavailable; using hyoklee/cte-hermes-shm@main (post-iowarp API)..."
+    git clone --depth=1 --branch main \
         https://github.com/hyoklee/cte-hermes-shm "$SRC_ROOT/hermes_shm"
 }
 
-# Install is complete when pod_array.h and at least one runtime lib are present.
+# Install is considered complete only when the post-iowarp stamp file exists,
+# meaning this script built it (not a leftover v0.0.0-alpha install).
 # hyoklee installs libhermes_shm_host.so; grc-iit installs libhermes_shm_data_structures.so.
 _hermes_shm_complete() {
+    [ -f "$INSTALL_ROOT/.hermes_shm_new_api" ] && \
     { [ -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ] \
-   || [ -f "$INSTALL_ROOT/lib/libhermes_shm_host.so" ]; } \
-    && [ -f "$INSTALL_ROOT/include/hermes_shm/data_structures/ipc/pod_array.h" ]
+   || [ -f "$INSTALL_ROOT/lib/libhermes_shm_host.so" ]; }
 }
 
 if ! _hermes_shm_complete; then
-    echo "==> Building HermesShm..."
+    echo "==> Building HermesShm (post-iowarp)..."
+    # Wipe any stale v0.0.0-alpha headers/libs so they don't pollute the build.
+    # Also clear the hermes install so it relinks against the new shm libs.
+    rm -rf "$INSTALL_ROOT/include/hermes_shm" \
+           "$INSTALL_ROOT/cmake/HermesShmCommon"* \
+           "$INSTALL_ROOT/.hermes_shm_new_api"
+    for _pat in libhermes_shm_data_structures libhermes_shm_host; do
+        rm -f "$INSTALL_ROOT/lib/${_pat}"* "$INSTALL_ROOT/lib64/${_pat}"*
+    done
+    rm -f "$INSTALL_ROOT/lib/libhermes.so" \
+          "$INSTALL_ROOT/lib/libhermes_posix.so"
     _clone_hermes_shm
     cd "$SRC_ROOT/hermes_shm"
     cmake -S . -B build \
@@ -252,6 +264,7 @@ if ! _hermes_shm_complete; then
         -DHERMES_SHM_ENABLE_TESTING=OFF
     cmake --build build -j"$(nproc)"
     cmake --install build
+    touch "$INSTALL_ROOT/.hermes_shm_new_api"
     echo "==> HermesShm installed"
 else
     echo "==> HermesShm already installed, skipping"
@@ -400,26 +413,77 @@ fi
 # HILOG expands to HLOG(...) which is never defined, causing "expected ';'"
 # errors. Redefine HILOG as a no-op immediately after the logging.h include.
 _CONFIG_PARSE="$INSTALL_ROOT/include/hermes_shm/util/config_parse.h"
-if ! grep -q '#define HILOG(...)' "$_CONFIG_PARSE"; then
+if [ -f "$_CONFIG_PARSE" ] && ! grep -q '#define HILOG(...)' "$_CONFIG_PARSE"; then
     awk '/#include "logging.h"/ {
         print
-        print "// HILOG compat: v0.0.0-alpha HILOG expands to HLOG which is undefined;"
-        print "// redefine as no-op to match new (verbosity,...) calling convention."
+        print "// Logging compat: HILOG/HELOG expand to HLOG which is undefined in"
+        print "// v0.0.0-alpha; redefine both as no-ops to match the new calling convention."
         print "#undef HILOG"
         print "#define HILOG(...)"
+        print "#undef HELOG"
+        print "#define HELOG(...)"
         next
     } { print }' "$_CONFIG_PARSE" > "${_CONFIG_PARSE}.tmp" \
         && mv "${_CONFIG_PARSE}.tmp" "$_CONFIG_PARSE"
-    echo "    Patched config_parse.h: HILOG no-op after logging.h"
+    echo "    Patched config_parse.h: HILOG/HELOG no-ops after logging.h"
 fi
 
-# v0.0.0-alpha macros.h uses HSHM_INLINE; grc-iit/hermes@master uses
-# HSHM_ALWAYS_INLINE. Add the alias to macros.h.
+# Patch macros.h with compatibility aliases for names that changed between
+# v0.0.0-alpha and the post-iowarp API used by grc-iit/hermes@master.
 _MACROS_H="$INSTALL_ROOT/include/hermes_shm/constants/macros.h"
-if ! grep -q 'HSHM_ALWAYS_INLINE' "$_MACROS_H"; then
-    printf '\n// Compatibility alias: newer hermes uses HSHM_ALWAYS_INLINE\n#define HSHM_ALWAYS_INLINE HSHM_INLINE\n' \
-        >> "$_MACROS_H"
-    echo "    Patched macros.h: HSHM_ALWAYS_INLINE -> HSHM_INLINE"
+if [ -f "$_MACROS_H" ]; then
+    if ! grep -q 'HSHM_ALWAYS_INLINE' "$_MACROS_H"; then
+        printf '\n// Compatibility alias: newer hermes uses HSHM_ALWAYS_INLINE\n#define HSHM_ALWAYS_INLINE HSHM_INLINE\n' \
+            >> "$_MACROS_H"
+        echo "    Patched macros.h: HSHM_ALWAYS_INLINE -> HSHM_INLINE"
+    fi
+    if ! grep -q 'HERMES_THREAD_MODEL' "$_MACROS_H"; then
+        printf '\n// HERMES_ -> HSHM_ singleton name aliases for grc-iit/hermes@master\n#ifndef HERMES_THREAD_MODEL\n#define HERMES_THREAD_MODEL HSHM_THREAD_MODEL\n#endif\n#ifndef HERMES_MEMORY_MANAGER\n#define HERMES_MEMORY_MANAGER HSHM_MEMORY_MANAGER\n#endif\n' \
+            >> "$_MACROS_H"
+        echo "    Patched macros.h: HERMES_THREAD_MODEL/MEMORY_MANAGER aliases"
+    fi
+fi
+
+# PACE has no Argobots. HRUN task-scheduler code calls ABT_thread_yield() and
+# friends via #include <abt.h>. Provide a minimal stub so compilation succeeds.
+_ABT_H="$INSTALL_ROOT/include/abt.h"
+if [ ! -f "$_ABT_H" ]; then
+    cat > "$_ABT_H" << 'ABTEOF'
+#pragma once
+/* Minimal Argobots stub: PACE has no Argobots/Mercury/Margo. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+typedef int ABT_thread;
+typedef int ABT_xstream;
+typedef int ABT_pool;
+typedef int ABT_sched;
+typedef int ABT_unit;
+typedef int ABT_mutex;
+typedef int ABT_cond;
+#define ABT_SUCCESS 0
+#define ABT_ERR_UNINITIALIZED (-1)
+static inline int ABT_thread_yield(void) { return ABT_SUCCESS; }
+static inline int ABT_thread_self(ABT_thread *t) { if (t) *t = 0; return ABT_SUCCESS; }
+static inline int ABT_xstream_self(ABT_xstream *x) { if (x) *x = 0; return ABT_SUCCESS; }
+static inline int ABT_xstream_get_main_pools(ABT_xstream x, int n, ABT_pool *p) {
+    (void)x; (void)n; if (p) *p = 0; return ABT_SUCCESS; }
+static inline int ABT_pool_pop_thread(ABT_pool p, ABT_thread *t) {
+    (void)p; if (t) *t = -1; return ABT_SUCCESS; }
+static inline int ABT_mutex_create(ABT_mutex *m) { if (m) *m = 0; return ABT_SUCCESS; }
+static inline int ABT_mutex_lock(ABT_mutex m) { (void)m; return ABT_SUCCESS; }
+static inline int ABT_mutex_unlock(ABT_mutex m) { (void)m; return ABT_SUCCESS; }
+static inline int ABT_mutex_free(ABT_mutex *m) { (void)m; return ABT_SUCCESS; }
+static inline int ABT_cond_create(ABT_cond *c) { if (c) *c = 0; return ABT_SUCCESS; }
+static inline int ABT_cond_wait(ABT_cond c, ABT_mutex m) { (void)c; (void)m; return ABT_SUCCESS; }
+static inline int ABT_cond_signal(ABT_cond c) { (void)c; return ABT_SUCCESS; }
+static inline int ABT_cond_broadcast(ABT_cond c) { (void)c; return ABT_SUCCESS; }
+static inline int ABT_cond_free(ABT_cond *c) { (void)c; return ABT_SUCCESS; }
+#ifdef __cplusplus
+}
+#endif
+ABTEOF
+    echo "    Created abt.h stub at $_ABT_H"
 fi
 
 # ---------------------------------------------------------------------------
@@ -482,7 +546,9 @@ DEPSEOF
         -DBoost_NO_SYSTEM_PATHS=ON \
         -DBUILD_MPI_TESTS=OFF \
         -DBUILD_OpenMP_TESTS=OFF \
-        "-DCMAKE_PROJECT_INCLUDE=$_DEPS_INJECT"
+        "-DCMAKE_PROJECT_INCLUDE=$_DEPS_INJECT" \
+        "-DCMAKE_CXX_FLAGS=-I$INSTALL_ROOT/include" \
+        "-DCMAKE_C_FLAGS=-I$INSTALL_ROOT/include"
     # -k: keep going past test/tool linker errors so core libs always build
     cmake --build build -j"$(nproc)" -- -k 2>&1 | tee /tmp/hermes_build.log || true
     # Verify the essential outputs before installing
