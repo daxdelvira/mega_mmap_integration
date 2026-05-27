@@ -272,9 +272,16 @@ if ! _hermes_shm_complete; then
         || cmake --build build -j"$(nproc)" --target hermes_shm_data_structures 2>/dev/null \
         || cmake --build build -j4 -- -k 2>/dev/null \
         || true
-    # cmake --install reads the install manifests and only installs registered
-    # library/header targets; unbuilt test executables have no install rules.
-    cmake --install build
+    # hyoklee registers test executables in install rules; since we built only
+    # the library target they don't exist and cmake --install errors on them.
+    # The library and headers ARE installed before cmake hits that error, so
+    # suppress the exit code and verify the library landed.
+    cmake --install build 2>/dev/null || true
+    if ! { [ -f "$INSTALL_ROOT/lib/libhermes_shm_host.so" ] || \
+           [ -f "$INSTALL_ROOT/lib/libhermes_shm_data_structures.so" ]; }; then
+        echo "ERROR: hermes_shm library not in $INSTALL_ROOT/lib after install" >&2
+        exit 1
+    fi
     touch "$INSTALL_ROOT/.hermes_shm_new_api"
     echo "==> HermesShm installed"
 else
