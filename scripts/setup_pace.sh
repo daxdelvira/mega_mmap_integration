@@ -304,6 +304,24 @@ _inject_stub "$_DS/containers/charbuf.h" \
 _inject_stub "$_DS/containers/converters.h" \
     '#pragma once' '/* converters provided transitively via data_structure.h -> all.h */'
 
+# config_parse.h in v0.0.0-alpha doesn't include logging.h, so HILOG is not
+# in scope when grc-iit/hermes config.h compiles. Also, v0.0.0-alpha's HILOG
+# uses a different signature (SUB_CODE, ...) vs the new (verbosity, ...).
+# Patch config_parse.h: include logging.h, then redefine HILOG as a no-op.
+_CONFIG_PARSE="$INSTALL_ROOT/include/hermes_shm/util/config_parse.h"
+if ! grep -q 'logging.h' "$_CONFIG_PARSE"; then
+    awk '/^#define HSHM_CONFIG_PARSE_PARSER_H$/ {
+        print
+        print "#include \"logging.h\""
+        print "// HILOG compat: v0.0.0-alpha signature differs; new API is HILOG(verbosity,...)"
+        print "#undef HILOG"
+        print "#define HILOG(...)"
+        next
+    } { print }' "$_CONFIG_PARSE" > "${_CONFIG_PARSE}.tmp" \
+        && mv "${_CONFIG_PARSE}.tmp" "$_CONFIG_PARSE"
+    echo "    Patched config_parse.h: added logging.h + HILOG no-op"
+fi
+
 # ---------------------------------------------------------------------------
 # 2. Hermes (GRC-IIT version — NOT HDF Group's Hermes)
 # ---------------------------------------------------------------------------
