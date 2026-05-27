@@ -270,6 +270,17 @@ else
     echo "==> HermesShm already installed, skipping"
 fi
 
+# Patch CtxAllocator in the installed allocator.h: add implicit conversion to
+# Allocator*.  post-iowarp CtxAllocator<AllocT> exposes operator*() returning
+# AllocT* but no operator Allocator*().  grc-iit/hermes@master passes
+# CtxAllocator directly where raw Allocator* is expected.
+_ALLOC_H="$INSTALL_ROOT/include/hermes_shm/memory/allocator/allocator.h"
+if [ -f "$_ALLOC_H" ] && ! grep -q 'operator Allocator\*() const' "$_ALLOC_H"; then
+    sed -i '/AllocT \*operator\*() const { return alloc_; }/a\  operator Allocator*() const { return static_cast<Allocator*>(alloc_); }' \
+        "$_ALLOC_H"
+    echo "    Patched allocator.h: added CtxAllocator::operator Allocator*()"
+fi
+
 # data_structure.h is a later-added umbrella; v0.0.0-alpha ships all.h instead.
 # Forward to it so grc-iit/hermes@master can compile.
 _DATA_STRUCT_H="$INSTALL_ROOT/include/hermes_shm/data_structures/data_structure.h"
@@ -413,7 +424,7 @@ fi
 # HILOG expands to HLOG(...) which is never defined, causing "expected ';'"
 # errors. Redefine HILOG as a no-op immediately after the logging.h include.
 _CONFIG_PARSE="$INSTALL_ROOT/include/hermes_shm/util/config_parse.h"
-if [ -f "$_CONFIG_PARSE" ] && ! grep -q '#define HILOG(...)' "$_CONFIG_PARSE"; then
+if [ -f "$_CONFIG_PARSE" ] && ! grep -q '#define HELOG(...)' "$_CONFIG_PARSE"; then
     awk '/#include "logging.h"/ {
         print
         print "// Logging compat: HILOG/HELOG expand to HLOG which is undefined in"
@@ -486,6 +497,28 @@ ABTEOF
     echo "    Created abt.h stub at $_ABT_H"
 fi
 
+# SHM_CONTAINER_TEMPLATE was removed from post-iowarp hermes_shm but
+# grc-iit/hermes@master uses it inside class bodies to inject shm_init_container,
+# GetAllocator, and shm_destroy members.  Provide a stub header force-included
+# via -include so every TU sees the definition before it is used.
+_COMPAT_H="$INSTALL_ROOT/include/hermes_compat.h"
+if [ ! -f "$_COMPAT_H" ]; then
+    cat > "$_COMPAT_H" << 'COMPATEOF'
+#pragma once
+// SHM_CONTAINER_TEMPLATE was removed in post-iowarp hermes_shm but
+// grc-iit/hermes@master still uses it inside class bodies.
+#ifndef SHM_CONTAINER_TEMPLATE
+#define SHM_CONTAINER_TEMPLATE(CLASS_NAME, TYPED_CLASS)                            \
+ public:                                                                            \
+  hshm::ipc::Allocator *_compat_alloc_{nullptr};                                   \
+  inline void shm_init_container(hshm::ipc::Allocator *a) { _compat_alloc_ = a; } \
+  inline hshm::ipc::Allocator *GetAllocator() const { return _compat_alloc_; }    \
+  inline void shm_destroy() {}
+#endif
+COMPATEOF
+    echo "    Created hermes_compat.h at $_COMPAT_H"
+fi
+
 # ---------------------------------------------------------------------------
 # 2. Hermes (GRC-IIT version — NOT HDF Group's Hermes)
 # ---------------------------------------------------------------------------
@@ -505,6 +538,39 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
 
     # Wipe any stale build dir so cmake re-reads the patched files
     rm -rf build
+
+    # Patch hermes source files for post-iowarp hermes_shm API changes.
+    # Sed is idempotent: if a string is already replaced there's nothing to match.
+
+    # 1. Singleton macros renamed: HERMES_ -> HSHM_
+    find . \( -name "*.h" -o -name "*.cc" \) \
+        | xargs sed -i \
+            -e 's/HERMES_THREAD_MODEL/HSHM_THREAD_MODEL/g' \
+            -e 's/HERMES_MEMORY_MANAGER/HSHM_MEMORY_MANAGER/g' \
+            2>/dev/null || true
+
+    # 2. Pointer struct field renamed: .allocator_id_ -> .alloc_id_
+    find . \( -name "*.h" -o -name "*.cc" \) \
+        | xargs sed -i 's/\.allocator_id_/.alloc_id_/g' 2>/dev/null || true
+
+    # 3. Allocator ID type renamed: hipc::allocator_id_t -> hipc::AllocatorId
+    find . \( -name "*.h" -o -name "*.cc" \) \
+        | xargs sed -i 's/hipc::allocator_id_t/hipc::AllocatorId/g' 2>/dev/null || true
+
+    # 4. hrun_client.h: post-iowarp NewObj/NewObjLocal/DelObj/AllocateLocalPtr
+    #    all require a MemContext as their first argument.
+    _HRUN_CLIENT="hrun/include/hrun/api/hrun_client.h"
+    if [ -f "$_HRUN_CLIENT" ]; then
+        sed -i \
+            -e 's/->NewObj<TaskT>(p, main_alloc_)/->NewObj<TaskT>(hshm::ipc::MemContext(), p)/g' \
+            -e 's/->NewObjLocal<TaskT>(main_alloc_)/->NewObjLocal<TaskT>(hshm::ipc::MemContext())/g' \
+            -e 's/main_alloc_, task_node,/hshm::ipc::MemContext(), task_node,/g' \
+            -e 's/->DelObj<TaskT>(task)/->DelObj<TaskT>(hshm::ipc::MemContext(), task)/g' \
+            -e 's/->DelObjLocal<TaskT>(task)/->DelObjLocal<TaskT>(hshm::ipc::MemContext(), task)/g' \
+            -e 's/AllocateLocalPtr<char>(size)/AllocateLocalPtr<char>(hshm::ipc::MemContext(), size)/g' \
+            "$_HRUN_CLIENT"
+        echo "    Patched hrun_client.h: MemContext first-arg insertions"
+    fi
 
     # Detect MPI root from the loaded openmpi lmod module or from the wrapper path.
     # Add it to CMAKE_PREFIX_PATH so FindMPI can locate headers and libs.
@@ -547,7 +613,7 @@ DEPSEOF
         -DBUILD_MPI_TESTS=OFF \
         -DBUILD_OpenMP_TESTS=OFF \
         "-DCMAKE_PROJECT_INCLUDE=$_DEPS_INJECT" \
-        "-DCMAKE_CXX_FLAGS=-I$INSTALL_ROOT/include" \
+        "-DCMAKE_CXX_FLAGS=-I$INSTALL_ROOT/include -include $INSTALL_ROOT/include/hermes_compat.h" \
         "-DCMAKE_C_FLAGS=-I$INSTALL_ROOT/include"
     # -k: keep going past test/tool linker errors so core libs always build
     cmake --build build -j"$(nproc)" -- -k 2>&1 | tee /tmp/hermes_build.log || true
