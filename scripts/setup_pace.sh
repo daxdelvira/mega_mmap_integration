@@ -299,6 +299,122 @@ if [ -f "$_ALLOC_H" ] && ! grep -q 'operator Allocator\*() const' "$_ALLOC_H"; t
     echo "    Patched allocator.h: added CtxAllocator::operator Allocator*()"
 fi
 
+# ---------------------------------------------------------------------------
+# Patch allocator.h:
+#   (a) Add forwarding template methods to class Allocator so that
+#       grc-iit/hermes@master can call NewObj/NewObjLocal/AllocateLocalPtr/
+#       DelObj/DelObjLocal/Convert on Allocator* pointers.  The bodies cast
+#       this to BaseAllocator<_ThreadLocalAllocator>* and forward; the cast
+#       compiles via static_cast (UB if runtime type differs, but acceptable
+#       for our stub-build goal).  Bodies reference BaseAllocator which is
+#       defined later in this header; they are only compiled at instantiation
+#       time (standard C++ behaviour for inline template methods).
+#   (b) Add CtxAllocator(Allocator*) constructor so that the implicit
+#       conversion Allocator* -> CtxAllocator<AllocT> is available, which
+#       lets vector(Allocator*, size_t) resolve via the existing
+#       vector(CtxAllocator<AllocT>, size_t, ...) constructor.
+# Patch memory_manager_.h:
+#   Add non-template GetAllocator(AllocatorId) overload returning Allocator*.
+#   grc-iit/hermes@master calls GetAllocator without a template argument to
+#   obtain main_alloc_ / data_alloc_ / rdata_alloc_.
+# ---------------------------------------------------------------------------
+cat > /tmp/_pace_patch_alloc.py << 'PYEOF'
+import re, sys
+path = sys.argv[1]
+with open(path) as f:
+    txt = f.read()
+if '_as_def_()' in txt:
+    sys.exit(0)
+COMPAT = r"""
+  // compat bridge — added by setup_pace.sh
+  // grc-iit/hermes@master calls these on Allocator*; post-iowarp moved them
+  // to BaseAllocator<CoreAllocT>.  Cast to the default concrete type and forward.
+  // Bodies see BaseAllocator at instantiation time (defined later in this header).
+  void _as_def_() {}  // sentinel for grep guard only
+  template<typename T, typename PointerT = Pointer, typename... Args>
+  inline T* NewObj(const MemContext &ctx, PointerT &p, Args &&...args) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    return static_cast<DA_*>(this)->template NewObj<T>(
+        ctx, p, std::forward<Args>(args)...); }
+  template<typename T, typename... Args>
+  inline auto NewObjLocal(const MemContext &ctx, Args &&...args) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    return static_cast<DA_*>(this)->template NewObjLocal<T>(
+        ctx, std::forward<Args>(args)...); }
+  template<typename T>
+  inline auto AllocateLocalPtr(size_t size) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    return static_cast<DA_*>(this)->template AllocateLocalPtr<T>(
+        MemContext(), size); }
+  template<typename T>
+  inline auto AllocateLocalPtr(const MemContext &ctx, size_t size) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    return static_cast<DA_*>(this)->template AllocateLocalPtr<T>(ctx, size); }
+  template<typename T>
+  inline void DelObj(const MemContext &ctx, T *obj) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    static_cast<DA_*>(this)->template DelObj<T>(ctx, obj); }
+  template<typename T, typename PtrT>
+  inline void DelObjLocal(const MemContext &ctx, PtrT &ptr) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    static_cast<DA_*>(this)->template DelObjLocal<T>(ctx, ptr); }
+  template<typename T, typename PointerT = Pointer>
+  inline T* Convert(const PointerT &p) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    return static_cast<DA_*>(this)->template Convert<T, PointerT>(p); }
+  template<typename T, typename PtrT>
+  inline void FreeLocalPtr(PtrT &ptr) {
+    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    static_cast<DA_*>(this)->template FreeLocalPtr<T>(ptr); }
+"""
+m = re.search(r'class Allocator\b[^{]*\{', txt)
+if m:
+    txt = txt[:m.end()] + COMPAT + txt[m.end():]
+CTX_CTOR = '\n  CtxAllocator(Allocator *a) : alloc_(static_cast<AllocT*>(a)), ctx_() {}'
+txt = txt.replace(
+    'CtxAllocator(AllocT *alloc) : alloc_(alloc), ctx_() {}',
+    'CtxAllocator(AllocT *alloc) : alloc_(alloc), ctx_() {}' + CTX_CTOR, 1)
+with open(path, 'w') as f:
+    f.write(txt)
+PYEOF
+
+cat > /tmp/_pace_patch_memmgr.py << 'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    txt = f.read()
+if 'GetAllocator<Allocator>' in txt:
+    sys.exit(0)
+OVERLOAD = ('\n  // compat: grc-iit/hermes@master calls GetAllocator without template arg\n'
+            '  HSHM_CROSS_FUN Allocator *GetAllocator(const AllocatorId &alloc_id) {\n'
+            '    return GetAllocator<Allocator>(alloc_id);\n  }')
+needle = 'HSHM_CROSS_FUN AllocT *GetAllocator(const AllocatorId &alloc_id) {'
+idx = txt.find(needle)
+if idx == -1:
+    sys.exit(0)
+brace_pos = idx + len(needle) - 1
+depth, pos = 1, brace_pos + 1
+while pos < len(txt) and depth:
+    if txt[pos] == '{': depth += 1
+    elif txt[pos] == '}': depth -= 1
+    pos += 1
+txt = txt[:pos] + OVERLOAD + txt[pos:]
+with open(path, 'w') as f:
+    f.write(txt)
+PYEOF
+
+_ALLOC_H="$INSTALL_ROOT/include/hermes_shm/memory/allocator/allocator.h"
+if [ -f "$_ALLOC_H" ] && ! grep -q '_as_def_()' "$_ALLOC_H"; then
+    python3 /tmp/_pace_patch_alloc.py "$_ALLOC_H"
+    echo "    Patched allocator.h: Allocator compat methods + CtxAllocator(Allocator*)"
+fi
+
+_MEM_MGR_H="$INSTALL_ROOT/include/hermes_shm/memory/memory_manager_.h"
+if [ -f "$_MEM_MGR_H" ] && ! grep -q 'GetAllocator<Allocator>' "$_MEM_MGR_H"; then
+    python3 /tmp/_pace_patch_memmgr.py "$_MEM_MGR_H"
+    echo "    Patched memory_manager_.h: non-template GetAllocator overload"
+fi
+
 # data_structure.h is a later-added umbrella; v0.0.0-alpha ships all.h instead.
 # Forward to it so grc-iit/hermes@master can compile.
 _DATA_STRUCT_H="$INSTALL_ROOT/include/hermes_shm/data_structures/data_structure.h"
