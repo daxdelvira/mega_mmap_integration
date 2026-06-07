@@ -439,9 +439,9 @@ fi
 _DS="$INSTALL_ROOT/include/hermes_shm/data_structures"
 mkdir -p "$_DS/containers"
 
+# Always overwrite stubs so stale relative-include content is replaced.
 _inject_stub() {
     local dst=$1; shift
-    [ -f "$dst" ] && return 0
     mkdir -p "$(dirname "$dst")"
     printf '%s\n' "$@" > "$dst"
     echo "    stubbed: $dst"
@@ -449,30 +449,34 @@ _inject_stub() {
 
 echo "==> Injecting missing hermes_shm API shims..."
 
+# Use angle-bracket includes throughout so the compiler searches the include
+# path (finds targets in the hermes_shm source tree) rather than the stub's
+# own directory (where the real headers are absent from the incomplete install).
+
 # ipc/ queue headers split out from ring_queue/ring_ptr_queue in newer versions
 _inject_stub "$_DS/ipc/mpsc_queue.h" \
-    '#pragma once' '#include "ring_queue.h"'
+    '#pragma once' '#include <hermes_shm/data_structures/ipc/ring_queue.h>'
 _inject_stub "$_DS/ipc/mpsc_ptr_queue.h" \
-    '#pragma once' '#include "ring_ptr_queue.h"'
+    '#pragma once' '#include <hermes_shm/data_structures/ipc/ring_ptr_queue.h>'
 
 # ipc/internal/ subdir: v0.0.0-alpha keeps shm_internal.h one level up at internal/
 mkdir -p "$_DS/ipc/internal"
 _inject_stub "$_DS/ipc/internal/shm_internal.h" \
-    '#pragma once' '#include "../../internal/shm_internal.h"'
+    '#pragma once' '#include <hermes_shm/data_structures/internal/shm_internal.h>'
 
 # serialization/shm_serialize.h renamed to local_serialize.h in v0.0.0-alpha
 _inject_stub "$_DS/serialization/shm_serialize.h" \
     '#pragma once' \
-    '#include "local_serialize.h"' \
-    '#include "serialize_common.h"'
+    '#include <hermes_shm/data_structures/serialization/local_serialize.h>' \
+    '#include <hermes_shm/data_structures/serialization/serialize_common.h>'
 
 # containers/ directory didn't exist; types are in ipc/ (or already in all.h)
 _inject_stub "$_DS/containers/spsc_queue.h" \
-    '#pragma once' '#include "../ipc/ring_queue.h"'
+    '#pragma once' '#include <hermes_shm/data_structures/ipc/ring_queue.h>'
 _inject_stub "$_DS/containers/split_ticket_queue.h" \
-    '#pragma once' '#include "../ipc/split_ticket_queue.h"'
+    '#pragma once' '#include <hermes_shm/data_structures/ipc/split_ticket_queue.h>'
 _inject_stub "$_DS/containers/charbuf.h" \
-    '#pragma once' '#include "../ipc/chararr.h"'
+    '#pragma once' '#include <hermes_shm/data_structures/ipc/chararr.h>'
 _inject_stub "$_DS/containers/converters.h" \
     '#pragma once' '/* converters provided transitively via data_structure.h -> all.h */'
 
