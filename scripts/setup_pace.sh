@@ -439,6 +439,7 @@ mkdir -p "$_DS/containers"
 _inject_stub() {
     local dst=$1; shift
     [ -f "$dst" ] && return 0
+    mkdir -p "$(dirname "$dst")"
     printf '%s\n' "$@" > "$dst"
     echo "    stubbed: $dst"
 }
