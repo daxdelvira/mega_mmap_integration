@@ -776,7 +776,8 @@ HSMCFGEOF
     # grc-iit version does).  Inject find_package(MPI) via CMAKE_PROJECT_INCLUDE
     # so it runs right after any project() call before adapter targets are defined.
     _DEPS_INJECT="$SRC_ROOT/hermes/deps_inject.cmake"
-    cat > "$_DEPS_INJECT" << 'DEPSEOF'
+    # Note: heredoc delimiter is unquoted so $INSTALL_ROOT and $SRC_ROOT expand.
+    cat > "$_DEPS_INJECT" << DEPSEOF
 # v0.0.0-alpha hermes_shm doesn't transitively export MPI or OpenMP targets.
 if(NOT TARGET MPI::MPI_CXX)
     find_package(MPI REQUIRED COMPONENTS CXX C)
@@ -784,6 +785,11 @@ endif()
 if(NOT TARGET OpenMP::OpenMP_CXX)
     find_package(OpenMP REQUIRED COMPONENTS CXX C)
 endif()
+# cmake --install for hermes_shm may have silently skipped headers when test
+# binaries were missing (we used || true).  Include both the install prefix and
+# the source tree so all headers are reachable regardless of install completeness.
+include_directories($INSTALL_ROOT/include)
+include_directories($SRC_ROOT/hermes_shm/include)
 DEPSEOF
 
     cmake -S . -B build \
