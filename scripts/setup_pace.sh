@@ -721,8 +721,13 @@ if [ ! -f "$INSTALL_ROOT/lib/libhermes.so" ]; then
     # PACE doesn't have Argobots/Mercury/Margo so thallium is unavailable.
     find . -name "CMakeLists.txt" -exec \
         sed -i 's/find_package(thallium CONFIG REQUIRED)/find_package(thallium CONFIG QUIET)/g' {} +
-    sed -i 's/find_package(thallium CONFIG REQUIRED)/find_package(thallium CONFIG QUIET)/g' \
-        "$INSTALL_ROOT/cmake/HermesShmCommonConfig.cmake"
+    # HermesShm may install its cmake config under lib/cmake/ or cmake/ depending on version.
+    _HERMES_SHM_CFG=$(find "$INSTALL_ROOT" -name "HermesShmCommonConfig.cmake" 2>/dev/null | head -1)
+    if [ -n "$_HERMES_SHM_CFG" ]; then
+        sed -i 's/find_package(thallium CONFIG REQUIRED)/find_package(thallium CONFIG QUIET)/g' \
+            "$_HERMES_SHM_CFG"
+        echo "    Patched thallium REQUIRED→QUIET in $_HERMES_SHM_CFG"
+    fi
 
     # hrun_client.h:67 calls SetThreadModel which hyoklee's Pthread class lacks.
     # Remove the call; thread model defaults to pthread without explicit setting.
