@@ -103,6 +103,8 @@ def main() -> None:
     ap.add_argument("--stats-csv", default="stats_dict.csv")
     ap.add_argument("--window-gb", type=float, default=None)
     ap.add_argument("--nprocs", type=int, default=1)
+    ap.add_argument("--no-mega", action="store_true",
+                    help="Skip Hermes injection; record as agentic-nomega control")
     args = ap.parse_args(my_argv)
 
     window_str = os.environ.get("MEGA_WINDOW", "256m")
@@ -112,8 +114,9 @@ def main() -> None:
     # Build child environment
     child_env = os.environ.copy()
 
-    interceptor = os.environ.get("HERMES_INTERCEPTOR", "")
-    if interceptor and Path(interceptor).exists():
+    use_mega = not args.no_mega
+    interceptor = os.environ.get("HERMES_INTERCEPTOR", "") if use_mega else ""
+    if use_mega and interceptor and Path(interceptor).exists():
         hermes_conf = os.environ.get("HERMES_CONF", "")
         if not hermes_conf:
             hermes_conf = str(_make_hermes_conf(window_str, workdir))
@@ -127,10 +130,11 @@ def main() -> None:
         print(f"[run_agentic] Hermes interceptor: {interceptor}")
         print(f"[run_agentic] HERMES_CONF: {hermes_conf}")
     else:
-        if interceptor:
+        if use_mega and interceptor:
             print(f"[run_agentic] WARNING: HERMES_INTERCEPTOR not found at {interceptor!r}",
                   file=sys.stderr)
-        print("[run_agentic] Running WITHOUT Hermes interception (metrics only)")
+        label = "nomega (control)" if args.no_mega else "no Hermes interceptor"
+        print(f"[run_agentic] Running WITHOUT Hermes interception ({label})")
 
     # Build child command
     cmd = [
@@ -150,10 +154,11 @@ def main() -> None:
     finally:
         mc.stop()
 
+    variant = "agentic-nomega" if args.no_mega else "agentic-mega"
     mc.write_csv(
         args.stats_csv,
         app="AtomAgents",
-        variant="agentic-mega",
+        variant=variant,
         nprocs=args.nprocs,
         window_size_gb=window_gb,
     )

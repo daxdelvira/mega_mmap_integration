@@ -1,0 +1,24 @@
+# Jarvis-style pipeline: AtomAgents Exp2 agentic (observe_only) — NO MegaMmap
+#
+# Control condition for atomagents_agentic_mega.yaml.  No Hermes daemon, no
+# LD_PRELOAD injection.  Passes --no-mega so the CSV row is labeled
+# "agentic-nomega", enabling direct comparison with the "agentic-mega" rows.
+
+name: atomagents_agentic_nomega
+env: mega_mmap
+
+params:
+  nprocs: 1
+  stats_csv: results/stats_dict.csv
+  hw_profile: l40s
+  exp2_extra_args: ""
+
+pkgs:
+  - pkg_type: cmd
+    pkg_name: atomagents_agentic_nomega
+    cmd: >-
+      python ${AGENT_HPC_ROOT}/mega_mmap_integration/atomagents_exp2/run_agentic.py
+        --no-mega
+        --stats-csv ${params.stats_csv}
+        --nprocs ${params.nprocs}
+        -- --hw-profile ${params.hw_profile} ${params.exp2_extra_args}

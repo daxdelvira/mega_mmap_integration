@@ -59,7 +59,7 @@ else
     echo "==> Hermes interceptor: $INTERCEPTOR"
 fi
 
-echo "==> AtomAgents Exp2 + MegaMmap test"
+echo "==> AtomAgents Exp2: all 4 variants (nomega control + mega experimental)"
 echo "    Window     : $WINDOW"
 echo "    HW profile : $HW_PROFILE"
 echo "    Results    : $RESULTS_DIR/stats_dict.csv"
@@ -67,49 +67,71 @@ echo ""
 
 mkdir -p "$RESULTS_DIR"
 
-# ---------------------------------------------------------------------------
-# Start Hermes daemon (needed even for interceptor mode)
-# ---------------------------------------------------------------------------
-if [ -n "$INTERCEPTOR" ] && [ -f "$INTERCEPTOR" ]; then
-    echo "==> Starting Hermes daemon..."
-    hermes_daemon &
-    HERMES_PID=$!
-    sleep 5
-    echo "    Hermes PID: $HERMES_PID"
+_run_python() {
+    MEGA_WINDOW=$WINDOW \
+    HERMES_INTERCEPTOR=${INTERCEPTOR:-} \
+    MEGA_WORKDIR=${MEGA_WORKDIR_ATOMAGENTS:-/tmp/mega_atomagents} \
+    python "$AGENT_HPC_ROOT/mega_mmap_integration/atomagents_exp2/$1" \
+        --stats-csv "$RESULTS_DIR/stats_dict.csv" \
+        --nprocs "$NPROCS" \
+        "${@:2}" \
+        -- --hw-profile "$HW_PROFILE" $EXTRA_ARGS
+}
 
-    cleanup() {
+_start_hermes() {
+    if [ -n "$INTERCEPTOR" ] && [ -f "$INTERCEPTOR" ]; then
+        echo "==> Starting Hermes daemon..."
+        hermes_daemon &
+        HERMES_PID=$!
+        sleep 5
+        echo "    Hermes PID: $HERMES_PID"
+    fi
+}
+
+_stop_hermes() {
+    if [ -n "${HERMES_PID:-}" ]; then
         echo "==> Stopping Hermes daemon..."
         kill "$HERMES_PID" 2>/dev/null || true
-    }
-    trap cleanup EXIT
-fi
+        unset HERMES_PID
+    fi
+}
 
 # ---------------------------------------------------------------------------
-# Run agentic variant (LLM-steered, observe_only)
+# 1/4  noai-nomega — LAMMPS, no Hermes (control)
 # ---------------------------------------------------------------------------
-echo "==> Running agentic variant (observe_only)..."
-MEGA_WINDOW=$WINDOW \
-HERMES_INTERCEPTOR=${INTERCEPTOR:-} \
-MEGA_WORKDIR=${MEGA_WORKDIR_ATOMAGENTS:-/tmp/mega_atomagents} \
-python "$AGENT_HPC_ROOT/mega_mmap_integration/atomagents_exp2/run_agentic.py" \
-    --stats-csv "$RESULTS_DIR/stats_dict.csv" \
-    --nprocs "$NPROCS" \
-    -- --hw-profile "$HW_PROFILE" $EXTRA_ARGS
-
+echo "==> [1/4] noai-nomega (LAMMPS baseline, no MegaMmap)..."
+_run_python run_noai.py --no-mega
 echo ""
 
 # ---------------------------------------------------------------------------
-# Run non-agentic variant (LAMMPS baseline)
+# 2/4  agentic-nomega — LLM, no Hermes (control)
 # ---------------------------------------------------------------------------
-echo "==> Running non-agentic variant (baseline)..."
-MEGA_WINDOW=$WINDOW \
-HERMES_INTERCEPTOR=${INTERCEPTOR:-} \
-MEGA_WORKDIR=${MEGA_WORKDIR_ATOMAGENTS:-/tmp/mega_atomagents} \
-python "$AGENT_HPC_ROOT/mega_mmap_integration/atomagents_exp2/run_noai.py" \
-    --stats-csv "$RESULTS_DIR/stats_dict.csv" \
-    --nprocs "$NPROCS" \
-    -- --hw-profile "$HW_PROFILE" $EXTRA_ARGS
-
+echo "==> [2/4] agentic-nomega (LLM, no MegaMmap)..."
+_run_python run_agentic.py --no-mega
 echo ""
+
+# ---------------------------------------------------------------------------
+# 3/4  noai-mega — LAMMPS + Hermes interceptor (experimental)
+# ---------------------------------------------------------------------------
+echo "==> [3/4] noai-mega (LAMMPS + MegaMmap)..."
+_start_hermes
+trap '_stop_hermes' EXIT
+_run_python run_noai.py
+_stop_hermes
+trap - EXIT
+echo ""
+
+# ---------------------------------------------------------------------------
+# 4/4  agentic-mega — LLM + Hermes interceptor (experimental)
+# ---------------------------------------------------------------------------
+echo "==> [4/4] agentic-mega (LLM + MegaMmap)..."
+_start_hermes
+trap '_stop_hermes' EXIT
+_run_python run_agentic.py
+_stop_hermes
+trap - EXIT
+echo ""
+
 echo "==> Done. Results written to $RESULTS_DIR/stats_dict.csv"
+echo ""
 cat "$RESULTS_DIR/stats_dict.csv"

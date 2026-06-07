@@ -421,11 +421,14 @@ fi
 
 # data_structure.h is a later-added umbrella; v0.0.0-alpha ships all.h instead.
 # Forward to it so grc-iit/hermes@master can compile.
+# Use angle-bracket include so the compiler searches the include path
+# (finds all.h in the hermes_shm source tree) rather than the same directory
+# (where all.h is absent from the incomplete install).
 _DATA_STRUCT_H="$INSTALL_ROOT/include/hermes_shm/data_structures/data_structure.h"
-if [ ! -f "$_DATA_STRUCT_H" ]; then
+if [ ! -f "$_DATA_STRUCT_H" ] || grep -q '#include "all.h"' "$_DATA_STRUCT_H"; then
     echo "==> Injecting missing data_structure.h (forwards to all.h)..."
     mkdir -p "$(dirname "$_DATA_STRUCT_H")"
-    printf '#ifndef HERMES_DATA_STRUCTURES_DATA_STRUCTURE_H_\n#define HERMES_DATA_STRUCTURES_DATA_STRUCTURE_H_\n#include "all.h"\n#endif\n' \
+    printf '#ifndef HERMES_DATA_STRUCTURES_DATA_STRUCTURE_H_\n#define HERMES_DATA_STRUCTURES_DATA_STRUCTURE_H_\n#include <hermes_shm/data_structures/all.h>\n#endif\n' \
         > "$_DATA_STRUCT_H"
     echo "    data_structure.h injected at $_DATA_STRUCT_H"
 fi
@@ -607,8 +610,10 @@ fi
 # config_parse.h already includes logging.h in v0.0.0-alpha, but logging.h's
 # HILOG expands to HLOG(...) which is never defined, causing "expected ';'"
 # errors. Redefine HILOG as a no-op immediately after the logging.h include.
-_CONFIG_PARSE="$INSTALL_ROOT/include/hermes_shm/util/config_parse.h"
-if [ -f "$_CONFIG_PARSE" ] && ! grep -q '#define HELOG(...)' "$_CONFIG_PARSE"; then
+_patch_config_parse() {
+    local f=$1
+    [ -f "$f" ] || return 0
+    grep -q '#define HELOG(...)' "$f" && return 0  # already patched
     awk '/#include "logging.h"/ {
         print
         print "// Logging compat: HILOG/HELOG expand to HLOG which is undefined in"
@@ -618,10 +623,13 @@ if [ -f "$_CONFIG_PARSE" ] && ! grep -q '#define HELOG(...)' "$_CONFIG_PARSE"; t
         print "#undef HELOG"
         print "#define HELOG(...)"
         next
-    } { print }' "$_CONFIG_PARSE" > "${_CONFIG_PARSE}.tmp" \
-        && mv "${_CONFIG_PARSE}.tmp" "$_CONFIG_PARSE"
-    echo "    Patched config_parse.h: HILOG/HELOG no-ops after logging.h"
-fi
+    } { print }' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+    echo "    Patched config_parse.h: HILOG/HELOG no-ops ($f)"
+}
+# Patch both installed and source-tree copies: the install may be incomplete so
+# the compiler can fall back to the source tree, which must also be clean.
+_patch_config_parse "$INSTALL_ROOT/include/hermes_shm/util/config_parse.h"
+_patch_config_parse "$SRC_ROOT/hermes_shm/include/hermes_shm/util/config_parse.h"
 
 # Patch macros.h with compatibility aliases for names that changed between
 # v0.0.0-alpha and the post-iowarp API used by grc-iit/hermes@master.
