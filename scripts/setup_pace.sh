@@ -288,16 +288,21 @@ else
     echo "==> HermesShm already installed, skipping"
 fi
 
-# Patch CtxAllocator in the installed allocator.h: add implicit conversion to
-# Allocator*.  post-iowarp CtxAllocator<AllocT> exposes operator*() returning
-# AllocT* but no operator Allocator*().  grc-iit/hermes@master passes
-# CtxAllocator directly where raw Allocator* is expected.
-_ALLOC_H="$INSTALL_ROOT/include/hermes_shm/memory/allocator/allocator.h"
-if [ -f "$_ALLOC_H" ] && ! grep -q 'operator Allocator\*() const' "$_ALLOC_H"; then
+# Patch CtxAllocator in both installed and source-tree allocator.h:
+# add implicit conversion to Allocator*.  post-iowarp CtxAllocator<AllocT>
+# exposes operator*() returning AllocT* but no operator Allocator*().
+# grc-iit/hermes@master passes CtxAllocator directly where Allocator* is
+# expected.  The build may pick up the source-tree copy (incomplete install).
+_patch_ctx_alloc_op() {
+    local f=$1
+    [ -f "$f" ] || return 0
+    grep -q 'operator Allocator\*() const' "$f" && return 0
     sed -i '/AllocT \*operator\*() const { return alloc_; }/a\  operator Allocator*() const { return static_cast<Allocator*>(alloc_); }' \
-        "$_ALLOC_H"
-    echo "    Patched allocator.h: added CtxAllocator::operator Allocator*()"
-fi
+        "$f"
+    echo "    Patched allocator.h CtxAllocator::operator Allocator*() ($f)"
+}
+_patch_ctx_alloc_op "$INSTALL_ROOT/include/hermes_shm/memory/allocator/allocator.h"
+_patch_ctx_alloc_op "$SRC_ROOT/hermes_shm/include/hermes_shm/memory/allocator/allocator.h"
 
 # ---------------------------------------------------------------------------
 # Patch allocator.h:
@@ -325,59 +330,61 @@ with open(path) as f:
     txt = f.read()
 if '_as_def_()' in txt:
     sys.exit(0)
+# Use _MallocAllocator — the concrete allocator type in v0.0.0-alpha.
+# (_ThreadLocalAllocator was a post-iowarp name that doesn't exist here.)
+# Both _MallocAllocator and BaseAllocator are forward-declared before
+# class Allocator so the typedef in each method resolves at instantiation time.
 COMPAT = r"""
  public:
   // compat bridge — added by setup_pace.sh
-  // grc-iit/hermes@master calls these on Allocator*; post-iowarp moved them
-  // to BaseAllocator<CoreAllocT>.  Forward via static_cast to concrete subtype.
-  // BaseAllocator is forward-declared before this class so the typedef resolves
-  // at definition time; the full definition is in scope at instantiation time.
   void _as_def_() {}  // sentinel for grep guard only
   template<typename T, typename PointerT = Pointer, typename... Args>
   inline T* NewObj(const MemContext &ctx, PointerT &p, Args &&...args) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     return static_cast<DA_*>(this)->template NewObj<T>(
         ctx, p, std::forward<Args>(args)...); }
   template<typename T, typename... Args>
   inline auto NewObjLocal(const MemContext &ctx, Args &&...args) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     return static_cast<DA_*>(this)->template NewObjLocal<T>(
         ctx, std::forward<Args>(args)...); }
   template<typename T>
   inline auto AllocateLocalPtr(size_t size) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     return static_cast<DA_*>(this)->template AllocateLocalPtr<T>(
         MemContext(), size); }
   template<typename T>
   inline auto AllocateLocalPtr(const MemContext &ctx, size_t size) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     return static_cast<DA_*>(this)->template AllocateLocalPtr<T>(ctx, size); }
   template<typename T>
   inline void DelObj(const MemContext &ctx, T *obj) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     static_cast<DA_*>(this)->template DelObj<T>(ctx, obj); }
   template<typename T, typename PtrT>
   inline void DelObjLocal(const MemContext &ctx, PtrT &ptr) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     static_cast<DA_*>(this)->template DelObjLocal<T>(ctx, ptr); }
   inline void Free(const Pointer &p) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     static_cast<DA_*>(this)->Free(p); }
   template<typename PtrT>
   inline void FreeLocalPtr(PtrT &ptr) {
-    typedef BaseAllocator<_ThreadLocalAllocator> DA_;
+    typedef BaseAllocator<_MallocAllocator> DA_;
     static_cast<DA_*>(this)->FreeLocalPtr(ptr); }
 """
 m = re.search(r'class Allocator\b[^{]*\{', txt)
 if m:
-    fwd = 'template<typename CoreAllocT> class BaseAllocator;  // compat fwd decl\n'
+    fwd = ('class _MallocAllocator;  // compat fwd decl\n'
+           'template<typename CoreAllocT> class BaseAllocator;  // compat fwd decl\n')
     txt = txt[:m.start()] + fwd + txt[m.start():]
     m2 = re.search(r'class Allocator\b[^{]*\{', txt)
     txt = txt[:m2.end()] + COMPAT + txt[m2.end():]
 CTX_CTOR = '\n  CtxAllocator(Allocator *a) : alloc_(static_cast<AllocT*>(a)), ctx_() {}'
-txt = txt.replace(
-    'CtxAllocator(AllocT *alloc) : alloc_(alloc), ctx_() {}',
-    'CtxAllocator(AllocT *alloc) : alloc_(alloc), ctx_() {}' + CTX_CTOR, 1)
+CTX_OP   = '\n  operator Allocator*() const { return static_cast<Allocator*>(alloc_); }'
+needle = 'CtxAllocator(AllocT *alloc) : alloc_(alloc), ctx_() {}'
+if needle in txt:
+    txt = txt.replace(needle, needle + CTX_CTOR + CTX_OP, 1)
 with open(path, 'w') as f:
     f.write(txt)
 PYEOF
@@ -432,6 +439,22 @@ _MEM_MGR_H_SRC="$SRC_ROOT/hermes_shm/include/hermes_shm/memory/memory_manager_.h
 if [ -f "$_MEM_MGR_H_SRC" ] && ! grep -q 'GetAllocator<Allocator>' "$_MEM_MGR_H_SRC"; then
     python3 /tmp/_pace_patch_memmgr.py "$_MEM_MGR_H_SRC"
     echo "    Patched source tree memory_manager_.h: non-template GetAllocator overload"
+fi
+
+# Post-hoc fixups for the source-tree allocator.h that was already patched by
+# the Python script with the WRONG concrete type name (_ThreadLocalAllocator).
+# _ThreadLocalAllocator is a post-iowarp invention; v0.0.0-alpha uses
+# _MallocAllocator as its concrete allocator.  Replace everywhere in the compat
+# bridge and add the _MallocAllocator forward declaration if missing.
+_ALLOC_H_SRC="$SRC_ROOT/hermes_shm/include/hermes_shm/memory/allocator/allocator.h"
+if [ -f "$_ALLOC_H_SRC" ] && grep -q '_ThreadLocalAllocator' "$_ALLOC_H_SRC"; then
+    sed -i 's/_ThreadLocalAllocator/_MallocAllocator/g' "$_ALLOC_H_SRC"
+    # Ensure _MallocAllocator fwd decl exists before the BaseAllocator one
+    if ! grep -q 'class _MallocAllocator;' "$_ALLOC_H_SRC"; then
+        sed -i 's/template<typename CoreAllocT> class BaseAllocator;  \/\/ compat fwd decl/class _MallocAllocator;  \/\/ compat fwd decl\ntemplate<typename CoreAllocT> class BaseAllocator;  \/\/ compat fwd decl/' \
+            "$_ALLOC_H_SRC"
+    fi
+    echo "    Fixed source tree allocator.h: _ThreadLocalAllocator -> _MallocAllocator"
 fi
 
 # data_structure.h is a later-added umbrella; v0.0.0-alpha ships all.h instead.
