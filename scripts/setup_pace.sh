@@ -419,6 +419,21 @@ if [ -f "$_MEM_MGR_H" ] && ! grep -q 'GetAllocator<Allocator>' "$_MEM_MGR_H"; th
     echo "    Patched memory_manager_.h: non-template GetAllocator overload"
 fi
 
+# Apply the same patches to the hermes_shm SOURCE TREE: cmake includes both
+# $INSTALL_ROOT/include and $SRC_ROOT/hermes_shm/include and may pick up the
+# source-tree copy when the install is incomplete.
+_ALLOC_H_SRC="$SRC_ROOT/hermes_shm/include/hermes_shm/memory/allocator/allocator.h"
+if [ -f "$_ALLOC_H_SRC" ] && ! grep -q '_as_def_()' "$_ALLOC_H_SRC"; then
+    python3 /tmp/_pace_patch_alloc.py "$_ALLOC_H_SRC"
+    echo "    Patched source tree allocator.h: compat bridge + CtxAllocator(Allocator*)"
+fi
+
+_MEM_MGR_H_SRC="$SRC_ROOT/hermes_shm/include/hermes_shm/memory/memory_manager_.h"
+if [ -f "$_MEM_MGR_H_SRC" ] && ! grep -q 'GetAllocator<Allocator>' "$_MEM_MGR_H_SRC"; then
+    python3 /tmp/_pace_patch_memmgr.py "$_MEM_MGR_H_SRC"
+    echo "    Patched source tree memory_manager_.h: non-template GetAllocator overload"
+fi
+
 # data_structure.h is a later-added umbrella; v0.0.0-alpha ships all.h instead.
 # Forward to it so grc-iit/hermes@master can compile.
 # Use angle-bracket include so the compiler searches the include path
@@ -440,9 +455,12 @@ _DS="$INSTALL_ROOT/include/hermes_shm/data_structures"
 mkdir -p "$_DS/containers"
 
 # Always overwrite stubs so stale relative-include content is replaced.
+# rm -f first: cmake --install can create read-only files; the redirect
+# would silently fail without removing the existing file first.
 _inject_stub() {
     local dst=$1; shift
     mkdir -p "$(dirname "$dst")"
+    rm -f "$dst"
     printf '%s\n' "$@" > "$dst"
     echo "    stubbed: $dst"
 }
@@ -637,19 +655,26 @@ _patch_config_parse "$SRC_ROOT/hermes_shm/include/hermes_shm/util/config_parse.h
 
 # Patch macros.h with compatibility aliases for names that changed between
 # v0.0.0-alpha and the post-iowarp API used by grc-iit/hermes@master.
-_MACROS_H="$INSTALL_ROOT/include/hermes_shm/constants/macros.h"
-if [ -f "$_MACROS_H" ]; then
-    if ! grep -q 'HSHM_ALWAYS_INLINE' "$_MACROS_H"; then
+# Guard on '^#define HSHM_ALWAYS_INLINE' — not just any occurrence — because
+# some macros.h versions mention the string in comments or preprocessor guards
+# without providing the actual definition.  Apply to both installed copy and
+# source tree (the build picks up whichever is found first).
+_patch_macros_h() {
+    local f=$1
+    [ -f "$f" ] || return 0
+    if ! grep -q '^#define HSHM_ALWAYS_INLINE' "$f"; then
         printf '\n// Compatibility alias: newer hermes uses HSHM_ALWAYS_INLINE\n#define HSHM_ALWAYS_INLINE HSHM_INLINE\n' \
-            >> "$_MACROS_H"
-        echo "    Patched macros.h: HSHM_ALWAYS_INLINE -> HSHM_INLINE"
+            >> "$f"
+        echo "    Patched macros.h HSHM_ALWAYS_INLINE alias ($f)"
     fi
-    if ! grep -q 'HERMES_THREAD_MODEL' "$_MACROS_H"; then
+    if ! grep -q 'HERMES_THREAD_MODEL' "$f"; then
         printf '\n// HERMES_ -> HSHM_ singleton name aliases for grc-iit/hermes@master\n#ifndef HERMES_THREAD_MODEL\n#define HERMES_THREAD_MODEL HSHM_THREAD_MODEL\n#endif\n#ifndef HERMES_MEMORY_MANAGER\n#define HERMES_MEMORY_MANAGER HSHM_MEMORY_MANAGER\n#endif\n' \
-            >> "$_MACROS_H"
-        echo "    Patched macros.h: HERMES_THREAD_MODEL/MEMORY_MANAGER aliases"
+            >> "$f"
+        echo "    Patched macros.h HERMES_ name aliases ($f)"
     fi
-fi
+}
+_patch_macros_h "$INSTALL_ROOT/include/hermes_shm/constants/macros.h"
+_patch_macros_h "$SRC_ROOT/hermes_shm/include/hermes_shm/constants/macros.h"
 
 # PACE has no Argobots. HRUN task-scheduler code calls ABT_thread_yield() and
 # friends via #include <abt.h>. Provide a minimal stub so compilation succeeds.
@@ -698,13 +723,27 @@ fi
 # GetAllocator, and shm_destroy members.  Provide a stub header force-included
 # via -include so every TU sees the definition before it is used.
 _COMPAT_H="$INSTALL_ROOT/include/hermes_compat.h"
-if [ ! -f "$_COMPAT_H" ] || ! grep -q '#include <abt.h>' "$_COMPAT_H"; then
+if [ ! -f "$_COMPAT_H" ] || ! grep -q 'HSHM_ALWAYS_INLINE' "$_COMPAT_H"; then
     cat > "$_COMPAT_H" << 'COMPATEOF'
 #pragma once
 // Force-included via -include so every TU sees these definitions.
 // ABT_thread_yield is called in template bodies; GCC phase-1 lookup requires
 // the declaration to be visible at the template definition point.
 #include <abt.h>
+// HSHM inline / cross-compile macros:
+// v0.0.0-alpha hermes_shm/constants/macros.h may not define HSHM_ALWAYS_INLINE
+// or HSHM_CROSS_FUN.  grc-iit/hermes@master uses them throughout class bodies.
+// Defined here with #ifndef guards so they are always visible but never override
+// a correct definition from macros.h (which is included later per TU).
+#ifndef HSHM_INLINE
+#define HSHM_INLINE inline
+#endif
+#ifndef HSHM_ALWAYS_INLINE
+#define HSHM_ALWAYS_INLINE inline __attribute__((always_inline))
+#endif
+#ifndef HSHM_CROSS_FUN
+#define HSHM_CROSS_FUN inline
+#endif
 // SHM_CONTAINER_TEMPLATE was removed from newer hermes_shm but
 // grc-iit/hermes@master uses it inside class bodies.
 #ifndef SHM_CONTAINER_TEMPLATE
